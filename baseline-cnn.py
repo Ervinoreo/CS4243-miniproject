@@ -546,7 +546,7 @@ def main():
     TRAIN_DIR = "./train"
     TEST_DIR = "./test"
     BATCH_SIZE = 32
-    EPOCHS = 20
+    EPOCHS = 200
     
     # Check for GPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
