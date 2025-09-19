@@ -665,22 +665,9 @@ def main():
             status = "✓" if pred_text == true_text else "✗"
             f.write(f"  {status} True: '{true_text}' | Pred: '{pred_text}'\n")
     
-    # Save model and processor
-    torch.save(model.state_dict(), 'captcha_cnn_model.pth')
     
-    with open('captcha_processor.pkl', 'wb') as f:
-        pickle.dump(processor, f)
-    
-    # Save results as pickle for further analysis
-    with open('test_results.pkl', 'wb') as f:
-        pickle.dump(results, f)
-    
-    print("Model, processor, and results saved successfully!")
     print("Files saved:")
-    print("  - captcha_cnn_model.pth (model weights)")
-    print("  - captcha_processor.pkl (data processor)")
     print("  - test_results.txt (human-readable results)")
-    print("  - test_results.pkl (detailed results for analysis)")
     
     # Plot training history
     plt.figure(figsize=(8, 6))
