@@ -15,6 +15,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import precision_recall_fscore_support, classification_report
 import string
 import re
 from tqdm import tqdm
@@ -429,6 +430,90 @@ class CaptchaTrainer:
         
         accuracy = correct_predictions / total_predictions
         return accuracy, correct_predictions, total_predictions, predictions
+    
+    def evaluate_comprehensive(self, dataloader, true_labels, processor, device='cpu'):
+        """Comprehensive evaluation with multiple metrics"""
+        predictions = self.predict(dataloader, processor, device)
+        
+        # CAPTCHA-level metrics
+        correct_captchas = 0
+        total_captchas = len(predictions)
+        
+        # Character-level metrics
+        true_chars = []
+        pred_chars = []
+        char_correct = 0
+        char_total = 0
+        
+        # For precision/recall calculation
+        all_true_texts = []
+        all_pred_texts = []
+        
+        for i in range(total_captchas):
+            pred_text = predictions[i]
+            true_text = processor.decode_prediction(true_labels[i])
+            
+            all_true_texts.append(true_text)
+            all_pred_texts.append(pred_text)
+            
+            # CAPTCHA-level accuracy
+            if pred_text == true_text:
+                correct_captchas += 1
+            
+            # Character-level accuracy
+            max_len = max(len(true_text), len(pred_text))
+            for j in range(max_len):
+                true_char = true_text[j] if j < len(true_text) else '<pad>'
+                pred_char = pred_text[j] if j < len(pred_text) else '<pad>'
+                
+                if j < len(true_text):  # Only count actual characters, not padding
+                    char_total += 1
+                    true_chars.append(true_char)
+                    pred_chars.append(pred_char)
+                    
+                    if true_char == pred_char:
+                        char_correct += 1
+        
+        # Calculate metrics
+        captcha_accuracy = correct_captchas / total_captchas
+        char_accuracy = char_correct / char_total if char_total > 0 else 0
+        
+        # Calculate precision, recall, F1 for each unique character
+        unique_chars = list(set(true_chars + pred_chars))
+        
+        # Convert characters to indices for sklearn
+        char_to_idx = {char: idx for idx, char in enumerate(unique_chars)}
+        true_char_indices = [char_to_idx[char] for char in true_chars]
+        pred_char_indices = [char_to_idx[char] for char in pred_chars]
+        
+        precision, recall, f1, support = precision_recall_fscore_support(
+            true_char_indices, pred_char_indices, average='weighted', zero_division=0
+        )
+        
+        # Macro averages
+        precision_macro, recall_macro, f1_macro, _ = precision_recall_fscore_support(
+            true_char_indices, pred_char_indices, average='macro', zero_division=0
+        )
+        
+        results = {
+            'captcha_accuracy': captcha_accuracy,
+            'captcha_correct': correct_captchas,
+            'captcha_total': total_captchas,
+            'char_accuracy': char_accuracy,
+            'char_correct': char_correct,
+            'char_total': char_total,
+            'precision_weighted': precision,
+            'recall_weighted': recall,
+            'f1_weighted': f1,
+            'precision_macro': precision_macro,
+            'recall_macro': recall_macro,
+            'f1_macro': f1_macro,
+            'predictions': predictions,
+            'true_texts': all_true_texts,
+            'pred_texts': all_pred_texts
+        }
+        
+        return results
 
 def visualize_predictions(X_test, y_test, predictions, processor, num_samples=10):
     """Visualize predictions"""
@@ -458,10 +543,10 @@ def visualize_predictions(X_test, y_test, predictions, processor, num_samples=10
 def main():
     """Main function"""
     # Configuration
-    TRAIN_DIR = "/Users/ervinyeoh/Desktop/unimods/cs4243/miniproject/train"
-    TEST_DIR = "/Users/ervinyeoh/Desktop/unimods/cs4243/miniproject/test"
+    TRAIN_DIR = "./train"
+    TEST_DIR = "./test"
     BATCH_SIZE = 32
-    EPOCHS = 30
+    EPOCHS = 20
     
     # Check for GPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -513,18 +598,32 @@ def main():
     
     # Evaluate on test set
     print("\nEvaluating on test set...")
-    accuracy, correct, total, predictions = trainer.evaluate_accuracy(test_loader, y_test, processor, device)
+    results = trainer.evaluate_comprehensive(test_loader, y_test, processor, device)
     
-    print(f"\nTest Results:")
-    print(f"Accuracy: {accuracy:.4f} ({correct}/{total})")
+    print(f"\n{'='*50}")
+    print(f"TEST RESULTS")
+    print(f"{'='*50}")
+    
+    print(f"\nCAPTCHA-Level Metrics:")
+    print(f"  Accuracy: {results['captcha_accuracy']:.4f} ({results['captcha_correct']}/{results['captcha_total']})")
+    
+    print(f"\nCharacter-Level Metrics:")
+    print(f"  Accuracy: {results['char_accuracy']:.4f} ({results['char_correct']}/{results['char_total']})")
+    print(f"  Precision (weighted): {results['precision_weighted']:.4f}")
+    print(f"  Recall (weighted): {results['recall_weighted']:.4f}")
+    print(f"  F1-Score (weighted): {results['f1_weighted']:.4f}")
+    print(f"  Precision (macro): {results['precision_macro']:.4f}")
+    print(f"  Recall (macro): {results['recall_macro']:.4f}")
+    print(f"  F1-Score (macro): {results['f1_macro']:.4f}")
     
     # Show some example predictions
-    print("\nSample predictions:")
+    print(f"\nSample Predictions:")
+    predictions = results['predictions']
     for i in range(min(10, len(predictions))):
         true_text = processor.decode_prediction(y_test[i])
         pred_text = predictions[i]
         status = "✓" if pred_text == true_text else "✗"
-        print(f"{status} True: '{true_text}' | Pred: '{pred_text}'")
+        print(f"  {status} True: '{true_text}' | Pred: '{pred_text}'")
     
     # Convert predictions back to arrays for visualization
     pred_arrays = []
@@ -539,14 +638,49 @@ def main():
     print("\nVisualizing predictions...")
     visualize_predictions(X_test, y_test, pred_arrays, processor, num_samples=10)
     
+    # Save detailed results
+    print("\nSaving results...")
+    
+    # Save metrics to text file
+    with open('./test_results.txt', 'w') as f:
+        f.write("CAPTCHA Recognition Test Results\n")
+        f.write("="*40 + "\n\n")
+        
+        f.write("CAPTCHA-Level Metrics:\n")
+        f.write(f"  Accuracy: {results['captcha_accuracy']:.4f} ({results['captcha_correct']}/{results['captcha_total']})\n\n")
+        
+        f.write("Character-Level Metrics:\n")
+        f.write(f"  Accuracy: {results['char_accuracy']:.4f} ({results['char_correct']}/{results['char_total']})\n")
+        f.write(f"  Precision (weighted): {results['precision_weighted']:.4f}\n")
+        f.write(f"  Recall (weighted): {results['recall_weighted']:.4f}\n")
+        f.write(f"  F1-Score (weighted): {results['f1_weighted']:.4f}\n")
+        f.write(f"  Precision (macro): {results['precision_macro']:.4f}\n")
+        f.write(f"  Recall (macro): {results['recall_macro']:.4f}\n")
+        f.write(f"  F1-Score (macro): {results['f1_macro']:.4f}\n\n")
+        
+        f.write("Sample Predictions:\n")
+        for i in range(min(20, len(predictions))):
+            true_text = processor.decode_prediction(y_test[i])
+            pred_text = predictions[i]
+            status = "✓" if pred_text == true_text else "✗"
+            f.write(f"  {status} True: '{true_text}' | Pred: '{pred_text}'\n")
+    
     # Save model and processor
-    print("\nSaving model...")
     torch.save(model.state_dict(), 'captcha_cnn_model.pth')
     
     with open('captcha_processor.pkl', 'wb') as f:
         pickle.dump(processor, f)
     
-    print("Model and processor saved successfully!")
+    # Save results as pickle for further analysis
+    with open('test_results.pkl', 'wb') as f:
+        pickle.dump(results, f)
+    
+    print("Model, processor, and results saved successfully!")
+    print("Files saved:")
+    print("  - captcha_cnn_model.pth (model weights)")
+    print("  - captcha_processor.pkl (data processor)")
+    print("  - test_results.txt (human-readable results)")
+    print("  - test_results.pkl (detailed results for analysis)")
     
     # Plot training history
     plt.figure(figsize=(8, 6))
