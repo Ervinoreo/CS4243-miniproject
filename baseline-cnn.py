@@ -355,7 +355,7 @@ class CaptchaTrainer:
     def train(self, train_loader, val_loader, epochs=30):
         history = {'train_loss': [], 'val_loss': []}
         best_val_loss = float('inf')
-        patience = 10
+        patience = 50
         patience_counter = 0
         
         for epoch in range(epochs):
