@@ -245,17 +245,26 @@ class CaptchaBaseline(nn.Module):
         self.resnet_layer3 = resnet.layer3
         self.resnet_layer4 = resnet.layer4
         
-        # Calculate feature map dimensions after ResNet
-        # Modified ResNet reduces spatial dimensions by 16x (stride 2 in conv1 and residual blocks, no maxpool)
-        # This matches the baseline CNN's 16x downsampling to get same timesteps
-        self.feature_height = img_height // 16
-        self.feature_width = img_width // 16
-        
         # ResNet-50 outputs 2048 channels after layer4
-        resnet_output_channels = 2048
+        self.resnet_output_channels = 2048
+        
+        # Calculate actual feature dimensions by running a dummy forward pass
+        with torch.no_grad():
+            dummy_input = torch.randn(1, 1, img_height, img_width)
+            x = self.resnet_conv1(dummy_input)
+            x = self.resnet_bn1(x)
+            x = self.resnet_relu(x)
+            # Skip maxpool to get 16x downsampling instead of 32x
+            x = self.resnet_layer1(x)
+            x = self.resnet_layer2(x)
+            x = self.resnet_layer3(x)
+            x = self.resnet_layer4(x)
+            
+            _, _, self.feature_height, self.feature_width = x.shape
+            print(f"Actual ResNet output dimensions: {self.feature_height} x {self.feature_width}")
         
         # RNN for sequence modeling
-        self.rnn_input_size = resnet_output_channels * self.feature_height
+        self.rnn_input_size = self.resnet_output_channels * self.feature_height
         self.rnn_hidden_size = 256
         self.rnn = nn.LSTM(self.rnn_input_size, self.rnn_hidden_size, 
                           num_layers=2, batch_first=True, bidirectional=True)
