@@ -145,7 +145,7 @@ def main():
     
     # Configuration
     MODEL_PATH = "captcha_detection/yolov8n_captcha_v1/weights/best.pt"  # Update this path
-    INPUT_FOLDER = "CAPTCHA.v1-v1.yolov8/train/images"  # Update this path
+    INPUT_FOLDER = "data/train/"  # Update this path
     OUTPUT_FOLDER = "inference"
     CONF_THRESHOLD = 0.25
     IOU_THRESHOLD = 0.6
