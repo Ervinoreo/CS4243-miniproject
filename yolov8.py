@@ -23,19 +23,7 @@ def train_yolov8_captcha(
 ):
     """
     Train YOLOv8 model for CAPTCHA character detection
-    
-    Args:
-        data_yaml_path: Path to data.yaml file
-        model_size: YOLOv8 model size (n, s, m, l, x)
-        epochs: Number of training epochs
-        batch_size: Training batch size
-        img_size: Input image size
-        project: Project directory name
-        name: Experiment name
-        resume: Resume from last checkpoint
-        device: Device to use (cuda/cpu/auto)
     """
-    
     
     # Initialize model
     model_name = f"yolov8{model_size}.pt"
@@ -47,7 +35,7 @@ def train_yolov8_captcha(
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
     
-    # Training configuration
+    # Training configuration (removed split since you have separate val folder)
     train_config = {
         'data': data_yaml_path,
         'epochs': epochs,
@@ -59,43 +47,41 @@ def train_yolov8_captcha(
         'resume': resume,
         # Optimization settings
         'optimizer': 'AdamW',
-        'lr0': 0.01,  # Initial learning rate
-        'lrf': 0.1,   # Final learning rate factor
+        'lr0': 0.01,
+        'lrf': 0.1,
         'momentum': 0.937,
         'weight_decay': 0.0005,
         'warmup_epochs': 3,
         'warmup_momentum': 0.8,
         'warmup_bias_lr': 0.1,
         # Augmentation settings
-        'hsv_h': 0.015,  # HSV hue augmentation
-        'hsv_s': 0.7,    # HSV saturation augmentation
-        'hsv_v': 0.4,    # HSV value augmentation
-        'degrees': 0.0,  # Rotation (degrees)
-        'translate': 0.1, # Translation
-        'scale': 0.5,    # Scale
-        'shear': 0.0,    # Shear
-        'perspective': 0.0, # Perspective
-        'flipud': 0.0,   # Vertical flip
-        'fliplr': 0.5,   # Horizontal flip
-        'mosaic': 1.0,   # Mosaic augmentation
-        'mixup': 0.0,    # Mixup augmentation
-        'copy_paste': 0.0, # Copy-paste augmentation
-        # Validation settings
+        'hsv_h': 0.015,
+        'hsv_s': 0.7,
+        'hsv_v': 0.4,
+        'degrees': 0.0,
+        'translate': 0.1,
+        'scale': 0.5,
+        'shear': 0.0,
+        'perspective': 0.0,
+        'flipud': 0.0,
+        'fliplr': 0.5,
+        'mosaic': 1.0,
+        'mixup': 0.0,
+        'copy_paste': 0.0,
+        # Training settings
         'val': True,
         'save': True,
-        'save_period': 10,  # Save checkpoint every N epochs
-        'cache': False,  # Cache images for faster training
-        'workers': 8,    # Number of worker threads
+        'save_period': 10,
+        'cache': False,
+        'workers': 8,
         'verbose': True,
-        'seed': 42,      # Random seed for reproducibility
+        'seed': 42,
         'deterministic': True,
-        # Early stopping
-        'patience': 50,  # Epochs to wait for no improvement
-        # Other settings
-        'single_cls': False,  # Treat as single-class dataset
-        'rect': False,   # Rectangular training
-        'cos_lr': False, # Cosine learning rate scheduler
-        'close_mosaic': 10, # Disable mosaic in final epochs
+        'patience': 50,
+        'single_cls': False,
+        'rect': False,
+        'cos_lr': False,
+        'close_mosaic': 10,
     }
     
     print(f"\n=== Training Configuration ===")
@@ -175,7 +161,6 @@ def main():
     """Main training pipeline"""
     # Configuration
     DATA_YAML = "/home/e/ervin/cv4243-working/CAPTCHA.v1-v1.yolov8/data.yaml"
-    TRAIN_IMAGES_DIR = "/home/e/ervin/cv4243-working/data/train/"
     MODEL_SIZE = "n"  # Start with nano for faster training
     EPOCHS = 100
     BATCH_SIZE = 16
@@ -212,27 +197,17 @@ def main():
         # Get best model path
         best_model_path = model.trainer.best
         
-        # Perform inference on first 5 training images
-        inference_output = perform_inference(
-            model_path=best_model_path,
-            train_images_dir=TRAIN_IMAGES_DIR,
-            output_dir="./inference",
-            num_images=5
-        )
-        
-        # Export model (optional)
-        try:
-            export_model(best_model_path, format='onnx')
-        except Exception as e:
-            print(f"Export failed: {e}")
-        
         print(f"\n=== Training Pipeline Completed ===")
         print(f"Best model: {best_model_path}")
-        print(f"Inference results: {inference_output}")
-        print(f"Use this command to make predictions:")
-        print(f"yolo predict model={best_model_path} source=path/to/test/images")
+        print(f"Results directory: {model.trainer.save_dir}")
+        print(f"\nTo make predictions on new images:")
+        print(f"yolo predict model={best_model_path} source=path/to/images")
+        print(f"\nTo run validation:")
+        print(f"yolo val model={best_model_path} data={DATA_YAML}")
         
     else:
         print("Training failed. Please check the error messages above.")
+
+        
 if __name__ == "__main__":
     main()
