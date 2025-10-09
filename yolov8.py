@@ -161,7 +161,7 @@ def main():
     """Main training pipeline"""
     # Configuration
     DATA_YAML = "/home/e/ervin/cv4243-working/CAPTCHA.v1-v1.yolov8/data.yaml"
-    MODEL_SIZE = "n"  # Start with nano for faster training
+    MODEL_SIZE = "l"  # Start with nano for faster training
     EPOCHS = 100
     BATCH_SIZE = 16
     IMG_SIZE = 640
