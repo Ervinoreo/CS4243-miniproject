@@ -1,5 +1,4 @@
-test-20250919T113142Z-1-001.zip
-train-20250919T113148Z-1-001.zip
+CAPTCHA.v1-v1.yolov8.zip
 .venv
-train/
-test/
+data/
+CAPTCHA.v1-v1.yolov8/
