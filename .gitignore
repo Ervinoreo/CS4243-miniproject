@@ -7,3 +7,4 @@ small_val_n/
 big_val_l/
 best.pt
 preprocess/__pycache__/
+logs/

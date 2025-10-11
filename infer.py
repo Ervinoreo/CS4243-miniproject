@@ -149,7 +149,7 @@ def main():
     OUTPUT_FOLDER = "inference"
     CONF_THRESHOLD = 0.25
     IOU_THRESHOLD = 0.6
-    MAX_IMAGES = 20  # Set to None to process all images, or specify a number
+    MAX_IMAGES = None  # Set to None to process all images, or specify a number
     
     print("=== YOLOv8 CAPTCHA Inference Script ===")
     print(f"🔧 Configuration:")
