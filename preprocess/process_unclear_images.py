@@ -357,10 +357,13 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
             size_filtered_types = []
             for filtered_bbox, filtered_color in zip(size_filtered_bboxes, size_filtered_colors):
                 for i, (orig_bbox, orig_color) in enumerate(zip(filtered_bboxes, filtered_colors)):
-                    if (filtered_bbox == orig_bbox and 
-                        ((filtered_color is None and orig_color is None) or 
-                         (filtered_color is not None and orig_color is not None and 
-                          all(abs(a - b) < 1e-6 for a, b in zip(filtered_color, orig_color))))):
+                    same_bbox = (filtered_bbox == orig_bbox)
+                    same_color = (
+                        (filtered_color is None and orig_color is None) or
+                        (filtered_color is not None and orig_color is not None and
+                        np.all(np.abs(filtered_color.astype(np.float32) - orig_color.astype(np.float32)) < 1e-6))
+                    )
+                    if same_bbox and same_color:
                         size_filtered_types.append(filtered_types[i])
                         break
         
