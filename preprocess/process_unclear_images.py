@@ -6,6 +6,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 from sklearn.cluster import DBSCAN
+from multiprocessing import Pool, cpu_count
+from functools import partial
 from detect_connected_components import create_color_mask, smooth_mask, draw_bounding_boxes_using_dfs
 from color_analysis import extract_main_colors_dbscan, is_similar_color, create_color_mask_for_color
 from bounding_box import (
@@ -475,11 +477,6 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
                 cv2.imwrite(str(segment_path), masked_segment)
                 segment_count += 1
         
-        print(f"Processed: {image_path.name}")
-        print(f"  - Saved debug image: {debug_path}")
-        print(f"  - Saved {segment_count} segments to: {image_segments_folder}")
-        print(f"  - Found {num_components} valid components, {len(wide_bboxes)} wide components, {len(all_wide_char_bboxes)} extracted characters")
-        
         # Return all bounding boxes for further processing
         return True, valid_bboxes, wide_bboxes, all_wide_char_bboxes, all_wide_char_colors
         
@@ -487,9 +484,25 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
         print(f"Error processing {image_path}: {str(e)}")
         return False, [], [], [], []
 
-def process_images(input_folder, output_folder, white_threshold=200, black_threshold=50, kernel_size=3, stride=3, min_area=100, width_threshold=1.1, segment_padding=3, color_mask_threshold=70, wide_box_color_threshold=30, size_multiplier=2.0, size_ratio_threshold=0.5, large_box_ratio=2.0, color_difference_threshold=50.0):
+def process_image_wrapper(args_tuple):
     """
-    Process all images in the input folder.
+    Wrapper function for multiprocessing. Takes a tuple of arguments and unpacks them.
+    """
+    (image_file, output_path, white_threshold, black_threshold, kernel_size, stride, 
+     min_area, width_threshold, segment_padding, color_mask_threshold, 
+     wide_box_color_threshold, size_multiplier, size_ratio_threshold, 
+     large_box_ratio, color_difference_threshold) = args_tuple
+    
+    return process_single_image(
+        image_file, output_path, white_threshold, black_threshold, kernel_size, 
+        stride, min_area, width_threshold, segment_padding, color_mask_threshold, 
+        wide_box_color_threshold, size_multiplier, size_ratio_threshold, 
+        large_box_ratio, color_difference_threshold
+    )
+
+def process_images(input_folder, output_folder, white_threshold=200, black_threshold=50, kernel_size=3, stride=3, min_area=100, width_threshold=1.1, segment_padding=3, color_mask_threshold=70, wide_box_color_threshold=30, size_multiplier=2.0, size_ratio_threshold=0.5, large_box_ratio=2.0, color_difference_threshold=50.0, num_workers=None):
+    """
+    Process all images in the input folder using multiprocessing.
     
     Args:
         input_folder: Path to input folder containing images
@@ -506,6 +519,7 @@ def process_images(input_folder, output_folder, white_threshold=200, black_thres
         size_ratio_threshold: Minimum ratio of box area to median area to keep boxes
         large_box_ratio: Maximum ratio of box area to median area to keep boxes
         color_difference_threshold: Color difference threshold for reclassifying valid boxes as wide boxes
+        num_workers: Number of worker processes to use (default: use all CPU cores)
     """
     input_path = Path(input_folder)
     output_path = Path(output_folder)
@@ -533,27 +547,63 @@ def process_images(input_folder, output_folder, white_threshold=200, black_thres
         print(f"No image files found in '{input_folder}'")
         return
     
+    # Sort image files for consistent processing order
+    image_files = sorted(image_files)
+    
+    # Determine number of workers
+    if num_workers is None:
+        num_workers = cpu_count()
+    
     print(f"Found {len(image_files)} image files")
+    print(f"Using {num_workers} worker processes")
     print(f"Using thresholds - White: {white_threshold}, Black: {black_threshold}")
     print(f"Using kernel size: {kernel_size}x{kernel_size}")
     print(f"Using minimum area: {min_area}")
     print(f"Using width threshold: {width_threshold}")
     print("-" * 50)
     
-    # Process each image
+    # Prepare arguments for multiprocessing
+    args_list = []
+    for image_file in image_files:
+        args_tuple = (
+            image_file, output_path, white_threshold, black_threshold, kernel_size, 
+            stride, min_area, width_threshold, segment_padding, color_mask_threshold, 
+            wide_box_color_threshold, size_multiplier, size_ratio_threshold, 
+            large_box_ratio, color_difference_threshold
+        )
+        args_list.append(args_tuple)
+    
+    # Process images using multiprocessing
     successful = 0
     all_valid_bboxes = []
     all_wide_bboxes = []
     all_wide_char_bboxes = []
     
-    for image_file in sorted(image_files):
-        success, valid_bboxes, wide_bboxes, wide_char_bboxes, wide_char_colors = process_single_image(image_file, output_path, white_threshold, black_threshold, kernel_size, stride, min_area, width_threshold, segment_padding, color_mask_threshold, wide_box_color_threshold, size_multiplier, size_ratio_threshold, large_box_ratio, color_difference_threshold)
-        if success:
-            successful += 1
-            # Store bounding boxes with image filename for reference
-            all_valid_bboxes.extend([(image_file.name, bbox) for bbox in valid_bboxes])
-            all_wide_bboxes.extend([(image_file.name, bbox) for bbox in wide_bboxes])
-            all_wide_char_bboxes.extend([(image_file.name, bbox, color) for bbox, color in zip(wide_char_bboxes, wide_char_colors)])
+    if num_workers == 1:
+        # Process sequentially if only 1 worker specified
+        for args_tuple in args_list:
+            success, valid_bboxes, wide_bboxes, wide_char_bboxes, wide_char_colors = process_image_wrapper(args_tuple)
+            if success:
+                successful += 1
+                image_file = args_tuple[0]
+                # Store bounding boxes with image filename for reference
+                all_valid_bboxes.extend([(image_file.name, bbox) for bbox in valid_bboxes])
+                all_wide_bboxes.extend([(image_file.name, bbox) for bbox in wide_bboxes])
+                all_wide_char_bboxes.extend([(image_file.name, bbox, color) for bbox, color in zip(wide_char_bboxes, wide_char_colors)])
+    else:
+        # Process in parallel using multiprocessing
+        with Pool(processes=num_workers) as pool:
+            results = pool.map(process_image_wrapper, args_list)
+        
+        # Collect results
+        for i, (success, valid_bboxes, wide_bboxes, wide_char_bboxes, wide_char_colors) in enumerate(results):
+            if success:
+                successful += 1
+                image_file = image_files[i]
+                # Store bounding boxes with image filename for reference
+                all_valid_bboxes.extend([(image_file.name, bbox) for bbox in valid_bboxes])
+                all_wide_bboxes.extend([(image_file.name, bbox) for bbox in wide_bboxes])
+                all_wide_char_bboxes.extend([(image_file.name, bbox, color) for bbox, color in zip(wide_char_bboxes, wide_char_colors)])
     
     print("-" * 50)
     print(f"Processing complete: {successful}/{len(image_files)} images processed successfully")
@@ -593,6 +643,8 @@ def main():
                        help="Maximum ratio of box area to median area to keep boxes (default: 2.0)")
     parser.add_argument("--color-difference-threshold", type=float, default=50.0,
                        help="Color difference threshold for reclassifying valid boxes as wide boxes (default: 50.0)")
+    parser.add_argument("-j", "--workers", type=int, default=None,
+                       help="Number of worker processes to use for parallel processing (default: use all CPU cores)")
     
     args = parser.parse_args()
     
@@ -645,8 +697,16 @@ def main():
         print("Error: Wide box color threshold must be a positive number")
         return
     
+    if args.workers is not None and args.workers < 1:
+        print("Error: Number of workers must be at least 1")
+        return
+    
+    # If workers not specified, use all CPU cores
+    num_workers = args.workers if args.workers is not None else cpu_count()
+    
     print(f"Input folder: {args.input_folder}")
     print(f"Output folder: {args.output}")
+    print(f"Number of workers: {num_workers}")
     print(f"White threshold: {args.white_threshold}")
     print(f"Black threshold: {args.black_threshold}")
     print(f"Kernel size: {args.kernel_size}")
@@ -662,7 +722,7 @@ def main():
     print("=" * 50)
     
     # Process images
-    valid_bboxes, wide_bboxes, wide_char_bboxes = process_images(args.input_folder, args.output, args.white_threshold, args.black_threshold, args.kernel_size, args.stride, args.min_area, args.width_threshold, args.segment_padding, args.color_mask_threshold, args.wide_box_color_threshold, args.mul, args.size_ratio_threshold, args.large_box_ratio, args.color_difference_threshold)
+    valid_bboxes, wide_bboxes, wide_char_bboxes = process_images(args.input_folder, args.output, args.white_threshold, args.black_threshold, args.kernel_size, args.stride, args.min_area, args.width_threshold, args.segment_padding, args.color_mask_threshold, args.wide_box_color_threshold, args.mul, args.size_ratio_threshold, args.large_box_ratio, args.color_difference_threshold, num_workers)
     
     # Save hyperparameters to JSON file
     if valid_bboxes is not None and wide_bboxes is not None and wide_char_bboxes is not None:
@@ -678,4 +738,7 @@ def main():
         )
 
 if __name__ == "__main__":
+    # Protect multiprocessing code for Windows
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()
