@@ -1,55 +1,7 @@
 import cv2
 import numpy as np
 
-def create_color_mask(image, white_threshold=200, black_threshold=50):
-    """
-    Create a mask for colored parts of the image by excluding white and black regions.
-    
-    Args:
-        image: Input BGR image
-        white_threshold: Threshold above which pixels are considered white (default: 200)
-        black_threshold: Threshold below which pixels are considered black (default: 50)
-    
-    Returns:
-        mask: Binary mask where colored regions are white (255) and non-colored are black (0)
-    """
-    # Convert BGR to grayscale for thresholding
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    # Create masks for white and black regions
-    white_mask = gray > white_threshold
-    black_mask = gray < black_threshold
-    
-    # Create colored region mask (not white and not black)
-    colored_mask = ~(white_mask | black_mask)
-    
-    # Convert boolean mask to uint8 (0 or 255)
-    colored_mask = colored_mask.astype(np.uint8) * 255
-    
-    return colored_mask
-
-def smooth_mask(mask, kernel_size=3, stride=3):
-    """
-    Apply smoothening technique to the mask using average (box) filter.
-    
-    Args:
-        mask: Binary mask image
-        kernel_size: Size of the averaging kernel (default: 3)
-    
-    Returns:
-        smoothed_mask: Smoothened binary mask
-    """
-    # Apply average blur (box filter) to smooth the mask with stride
-    blurred = cv2.blur(mask, (kernel_size, kernel_size))
-    if stride > 1:
-        blurred = blurred[::stride, ::stride]
-
-        # Upsample the blurred mask back to original size
-        blurred = cv2.resize(blurred, (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_LINEAR)
-
-    return blurred
-
-def dfs_connected_component(mask, visited, start_row, start_col, component_pixels, black_threshold):
+def dfs_connected_component_black_white(mask, visited, start_row, start_col, component_pixels, black_threshold):
     """
     Depth-First Search to find all pixels in a connected component.
     
@@ -88,14 +40,14 @@ def dfs_connected_component(mask, visited, start_row, start_col, component_pixel
                 not visited[new_row, new_col] and mask[new_row, new_col] > black_threshold):
                 stack.append((new_row, new_col))
 
-def draw_bounding_boxes_using_dfs(mask, min_area=100, black_threshold=50, width_threshold=1.1):
+def draw_bounding_boxes_using_dfs(mask, min_area=40, black_threshold=5, width_threshold=1.1):
     """
     Find connected components using DFS and draw bounding boxes around them.
     
     Args:
         mask: Binary mask image
-        min_area: Minimum area threshold for connected components (default: 100)
-        black_threshold: Threshold below which pixels are considered black (default: 50)
+        min_area: Minimum area threshold for connected components (default: 40)
+        black_threshold: Threshold below which pixels are considered black (default: 5)
         width_threshold: Threshold for filtering wide bounding boxes (width > height * threshold) (default: 1.1)
     
     Returns:
@@ -130,7 +82,7 @@ def draw_bounding_boxes_using_dfs(mask, min_area=100, black_threshold=50, width_
                 component_pixels = []
                 
                 # Use DFS to find all connected pixels
-                dfs_connected_component(mask_gray, visited, row, col, component_pixels, black_threshold)
+                dfs_connected_component_black_white(mask_gray, visited, row, col, component_pixels, black_threshold)
                 
                 # Check if component is large enough
                 if len(component_pixels) >= min_area:
@@ -169,3 +121,64 @@ def draw_bounding_boxes_using_dfs(mask, min_area=100, black_threshold=50, width_
                         valid_components += 1
     
     return mask_with_boxes, valid_components, valid_bboxes, wide_bboxes
+
+
+def find_color_connected_components_dfs(mask, min_component_size=10):
+    """Find all connected components in the mask using DFS."""
+    height, width = mask.shape
+    visited = set()
+    components = []
+    
+    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+    
+    for y in range(height):
+        for x in range(width):
+            if mask[y, x] and (y, x) not in visited:
+                component = []
+                stack = [(y, x)]
+                
+                while stack:
+                    cy, cx = stack.pop()
+                    if (cy, cx) in visited or cy < 0 or cy >= height or cx < 0 or cx >= width:
+                        continue
+                    if not mask[cy, cx]:
+                        continue
+                    
+                    visited.add((cy, cx))
+                    component.append((cy, cx))
+                    
+                    for dy, dx in directions:
+                        new_y, new_x = cy + dy, cx + dx
+                        if (new_y, new_x) not in visited:
+                            stack.append((new_y, new_x))
+                
+                if len(component) >= min_component_size:
+                    components.append(component)
+    
+    return components
+
+
+def draw_bounding_box_from_component(component, padding=0, image_shape=None):
+    """Get bounding box from a connected component with padding."""
+    if not component:
+        return None
+    
+    y_coords = [pos[0] for pos in component]
+    x_coords = [pos[1] for pos in component]
+    
+    y_min, y_max = min(y_coords), max(y_coords)
+    x_min, x_max = min(x_coords), max(x_coords)
+    
+    if image_shape:
+        height, width = image_shape
+        x_min = max(0, x_min - padding)
+        y_min = max(0, y_min - padding)
+        x_max = min(width - 1, x_max + padding)
+        y_max = min(height - 1, y_max + padding)
+    else:
+        x_min = max(0, x_min - padding)
+        y_min = max(0, y_min - padding)
+        x_max = x_max + padding
+        y_max = y_max + padding
+    
+    return (x_min, y_min, x_max, y_max)

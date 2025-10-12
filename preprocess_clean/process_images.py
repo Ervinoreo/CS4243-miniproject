@@ -1,61 +1,40 @@
 import cv2
 import numpy as np
-import os
 import argparse
-import json
-from datetime import datetime
 from pathlib import Path
-from sklearn.cluster import DBSCAN
+from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
-from functools import partial
-from detect_connected_components import create_color_mask, smooth_mask, draw_bounding_boxes_using_dfs
-from color_analysis import extract_main_colors_dbscan, is_similar_color, create_color_mask_for_color
+from utils import save_processing_parameters_to_json
+from detect_connected_components import (
+    draw_bounding_boxes_using_dfs,
+    find_color_connected_components_dfs,
+    draw_bounding_box_from_component,
+)
+from color_analysis import (
+    create_color_mask_black_white,
+    create_color_mask_for_color,
+    smooth_mask,
+    check_multiple_colors_in_bbox,
+    extract_main_colors_dbscan,
+    apply_black_threshold_to_segment,
+    apply_color_mask_to_segment,
+    create_color_mask_white,
+)
 from bounding_box import (
-    get_bounding_box_from_component,
+    merge_components_with_ufds,
     merge_nearby_components,
     merge_nested_components,
-    merge_components_with_ufds,
     filter_boxes_by_pixel_density,
+    filter_large_colored_boxes,
     filter_boxes_by_size,
-    filter_large_colored_boxes
+    calculate_stroke_width_for_bbox,
+    filter_boxes_by_stroke_width,
 )
-from utils import save_unclear_processing_parameters_to_json
 
-def find_connected_components_dfs(mask, min_component_size=10):
-    """Find all connected components in the mask using DFS."""
-    height, width = mask.shape
-    visited = set()
-    components = []
-    
-    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-    
-    for y in range(height):
-        for x in range(width):
-            if mask[y, x] and (y, x) not in visited:
-                component = []
-                stack = [(y, x)]
-                
-                while stack:
-                    cy, cx = stack.pop()
-                    if (cy, cx) in visited or cy < 0 or cy >= height or cx < 0 or cx >= width:
-                        continue
-                    if not mask[cy, cx]:
-                        continue
-                    
-                    visited.add((cy, cx))
-                    component.append((cy, cx))
-                    
-                    for dy, dx in directions:
-                        new_y, new_x = cy + dy, cx + dx
-                        if (new_y, new_x) not in visited:
-                            stack.append((new_y, new_x))
-                
-                if len(component) >= min_component_size:
-                    components.append(component)
-    
-    return components
-
-def process_wide_bounding_box(image, wide_bbox, color_threshold=40, padding=3, distance_threshold=30, area_ratio_threshold=0.2, density_ratio_threshold=0.25, white_threshold=245, black_threshold=10):
+def process_wide_bounding_box(image, wide_bbox, color_threshold=40, padding=3, 
+                              distance_threshold=30, area_ratio_threshold=0.2, 
+                              density_ratio_threshold=0.25, 
+                              white_threshold=245, black_threshold=10):
     """Process a wide bounding box to extract character components using DBSCAN."""
     x_min, y_min, x_max, y_max, width, height = wide_bbox
     
@@ -84,10 +63,10 @@ def process_wide_bounding_box(image, wide_bbox, color_threshold=40, padding=3, d
     
     for color in main_colors:
         color_mask = create_color_mask_for_color(roi, color, color_threshold)
-        components = find_connected_components_dfs(color_mask, min_component_size=1)
+        components = find_color_connected_components_dfs(color_mask, min_component_size=1)
         
         for component in components:
-            bbox = get_bounding_box_from_component(
+            bbox = draw_bounding_box_from_component(
                 component, 
                 padding=padding, 
                 image_shape=roi.shape[:2]
@@ -128,115 +107,11 @@ def process_wide_bounding_box(image, wide_bbox, color_threshold=40, padding=3, d
     return final_boxes, final_colors
 
 
-def apply_color_mask_to_segment(segment, target_color, color_mask_threshold=70):
-    """
-    Apply color masking to a segment, making non-matching pixels white.
-    
-    Args:
-        segment: Image segment (BGR format)
-        target_color: Target color to preserve (BGR format)
-        color_mask_threshold: Threshold for color similarity
-    
-    Returns:
-        Masked segment with non-matching pixels set to white
-    """
-    if segment.size == 0:
-        return segment
-    
-    # Create a copy of the segment
-    masked_segment = segment.copy()
-    
-    # Calculate color differences for each pixel
-    height, width = segment.shape[:2]
-    for y in range(height):
-        for x in range(width):
-            pixel_color = segment[y, x]
-            # Calculate Euclidean distance in color space
-            color_distance = np.linalg.norm(pixel_color.astype(float) - target_color.astype(float))
-            
-            # If pixel is not similar to target color, make it white
-            if color_distance > color_mask_threshold:
-                masked_segment[y, x] = [255, 255, 255]  # White in BGR
-    
-    return masked_segment
-
-
-def apply_black_threshold_to_segment(segment, black_threshold):
-    """
-    Apply black threshold filtering to a valid segment, making pixels below threshold white.
-    
-    Args:
-        segment: Image segment (BGR format)
-        black_threshold: Threshold below which pixels are made white
-    
-    Returns:
-        Processed segment with dark pixels below threshold set to white
-    """
-    if segment.size == 0:
-        return segment
-    
-    # Create a copy of the segment
-    processed_segment = segment.copy()
-    
-    # Convert to grayscale to check pixel intensity
-    gray_segment = cv2.cvtColor(segment, cv2.COLOR_BGR2GRAY)
-    
-    # Create mask for pixels below black threshold
-    below_threshold_mask = gray_segment < black_threshold
-    
-    # Set pixels below threshold to white
-    processed_segment[below_threshold_mask] = [255, 255, 255]  # White in BGR
-    
-    return processed_segment
-
-
-def check_multiple_colors_in_bbox(image, bbox, color_difference_threshold=50.0, white_threshold=245, black_threshold=10):
-    """
-    Check if a bounding box contains multiple distinct colors using DBSCAN.
-    
-    Args:
-        image: Input image (BGR format)
-        bbox: Bounding box tuple (x1, y1, x2, y2, width, height)
-        color_difference_threshold: Threshold for determining if colors are different enough
-        white_threshold: Threshold for white pixels
-        black_threshold: Threshold for black pixels
-    
-    Returns:
-        Boolean indicating if the box contains multiple distinct colors
-    """
-    x1, y1, x2, y2, _, _ = bbox
-    
-    # Extract the ROI from the image
-    roi = image[y1:y2+1, x1:x2+1]
-    
-    if roi.size == 0:
-        return False
-    
-    # Use DBSCAN to find main colors in the ROI
-    main_colors = extract_main_colors_dbscan(
-        roi, 
-        eps=15, 
-        min_samples=20,  # Lower threshold for smaller regions
-        threshold=0.01,  # Lower threshold for smaller regions
-        white_threshold=white_threshold, 
-        black_threshold=black_threshold
-    )
-    
-    # If we have less than 2 colors, it's not multi-colored
-    if len(main_colors) < 2:
-        return False
-    
-    # Check if any two colors are different enough
-    for i in range(len(main_colors)):
-        for j in range(i + 1, len(main_colors)):
-            color_distance = np.linalg.norm(main_colors[i].astype(float) - main_colors[j].astype(float))
-            if color_distance >= color_difference_threshold:
-                return True
-    
-    return False
-
-
-def process_single_image(image_path, output_folder, white_threshold=200, black_threshold=50, kernel_size=3, stride=3, min_area=100, width_threshold=1.1, segment_padding=3, color_mask_threshold=70, wide_box_color_threshold=30, size_multiplier=2.0, size_ratio_threshold=0.5, large_box_ratio=2.0, color_difference_threshold=50.0):
+def process_single_image(image_path, output_folder, white_threshold=250, black_threshold=5, 
+                         kernel_size=3, stride=3, min_area=100, width_threshold=1.1, segment_padding=3, 
+                         color_mask_threshold=70, wide_box_color_threshold=30, size_multiplier=2.0, 
+                         size_ratio_threshold=0.5, large_box_ratio=2.0, color_difference_threshold=50.0,
+                         stroke_width_ratio_threshold=0.3, color_flag=False):
     """
     Process a single image to create combined visualization with original image, mask, and smoothened mask with bounding boxes.
     Also segments the image based on bounding boxes.
@@ -256,6 +131,7 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
         size_ratio_threshold: Minimum ratio of box area to median area to keep boxes
         large_box_ratio: Maximum ratio of box area to median area to keep boxes
         color_difference_threshold: Color difference threshold for reclassifying valid boxes as wide boxes
+        stroke_width_ratio_threshold: Maximum ratio of box stroke width to median stroke width to keep boxes (boxes with stroke width < median * threshold are kept)
     
     Returns:
         Tuple containing (success_status, valid_bboxes, wide_bboxes)
@@ -267,10 +143,8 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
             print(f"Warning: Could not read image {image_path}")
             return False, [], [], [], []
         
-        print(f"Processing: {image_path.name}")
-        
         # Create color mask
-        mask = create_color_mask(image, white_threshold, black_threshold)
+        mask = create_color_mask_black_white(image, white_threshold, black_threshold)
         
         # Apply averaging to the mask
         smoothed_mask = smooth_mask(mask, kernel_size, stride)
@@ -284,11 +158,9 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
         
         for valid_bbox in valid_bboxes:
             if check_multiple_colors_in_bbox(image, valid_bbox, color_difference_threshold, white_threshold, black_threshold):
-                # Reclassify as wide box
-                additional_wide_bboxes.append(valid_bbox)
+                additional_wide_bboxes.append(valid_bbox)  # Reclassify as wide box
             else:
-                # Keep as valid box
-                remaining_valid_bboxes.append(valid_bbox)
+                remaining_valid_bboxes.append(valid_bbox)  # Keep as valid box
         
         # Update the lists
         valid_bboxes = remaining_valid_bboxes
@@ -366,7 +238,7 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
                     if same_bbox and same_color:
                         size_filtered_types.append(filtered_types[i])
                         break
-        
+
         # Separate filtered boxes back into their original categories
         filtered_valid_bboxes = []
         filtered_char_bboxes = []
@@ -387,6 +259,21 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
         valid_bboxes = filtered_valid_bboxes
         all_wide_char_bboxes = filtered_char_bboxes
         all_wide_char_colors = filtered_char_colors
+
+        # # Apply stroke width filtering
+        # stroke_width_filtered_valid_bboxes, stroke_width_filtered_char_bboxes, stroke_width_filtered_char_colors = filter_boxes_by_stroke_width(
+        #     image, 
+        #     filtered_valid_bboxes, 
+        #     filtered_char_bboxes, 
+        #     filtered_char_colors, 
+        #     stroke_width_ratio_threshold, 
+        #     wide_box_color_threshold
+        # )
+        
+        # # Update the lists with stroke width filtered results
+        # valid_bboxes = stroke_width_filtered_valid_bboxes
+        # all_wide_char_bboxes = stroke_width_filtered_char_bboxes
+        # all_wide_char_colors = stroke_width_filtered_char_colors
         
         # Create final color image with all bounding boxes
         final_color_image = image.copy()
@@ -430,55 +317,86 @@ def process_single_image(image_path, output_folder, white_threshold=200, black_t
         
         # Get image dimensions for padding bounds checking
         img_height, img_width = image.shape[:2]
+
+        # Combine all bounding boxes and their types for sorting based on x_min, 
+        # save the rank bounding box tgt with rank in a separate array (i.e. (bounding_box, type, rank))
+        all_bboxes_with_types = []
         
-        # Segment and save valid bounding boxes
-        segment_count = 0
-        for i, valid_bbox in enumerate(valid_bboxes):
+        # Add valid bboxes with their type
+        for valid_bbox in valid_bboxes:
             x1, y1, x2, y2, _, _ = valid_bbox
-            
-            # Apply padding with bounds checking
-            x1_padded = max(0, x1 - segment_padding)
-            y1_padded = max(0, y1 - segment_padding)
-            x2_padded = min(img_width - 1, x2 + segment_padding)
-            y2_padded = min(img_height - 1, y2 + segment_padding)
-            
-            # Extract segment
-            segment = image[y1_padded:y2_padded+1, x1_padded:x2_padded+1]
-            
-            if segment.size > 0:
-                # Apply black threshold filtering to make dark pixels white
-                processed_segment = apply_black_threshold_to_segment(segment, black_threshold)
-                
-                segment_filename = f"valid_{i:03d}.png"
-                segment_path = image_segments_folder / segment_filename
-                cv2.imwrite(str(segment_path), processed_segment)
-                segment_count += 1
+            all_bboxes_with_types.append((valid_bbox, 'valid', x1))
         
-        # Segment and save character bounding boxes from wide boxes with color masking
-        for i, (char_bbox, char_color) in enumerate(zip(all_wide_char_bboxes, all_wide_char_colors)):
+        # Add character bboxes with their type and color
+        for char_bbox, char_color in zip(all_wide_char_bboxes, all_wide_char_colors):
             x1, y1, x2, y2 = char_bbox
-            
-            # Apply padding with bounds checking
-            x1_padded = max(0, x1 - segment_padding)
-            y1_padded = max(0, y1 - segment_padding)
-            x2_padded = min(img_width - 1, x2 + segment_padding)
-            y2_padded = min(img_height - 1, y2 + segment_padding)
-            
-            # Extract segment
-            segment = image[y1_padded:y2_padded+1, x1_padded:x2_padded+1]
-            
-            if segment.size > 0:
-                # Apply color masking only if a specific color was detected
-                if char_color is not None:
-                    masked_segment = apply_color_mask_to_segment(segment, char_color, wide_box_color_threshold)
-                else:
-                    # No specific color detected, use original segment (from wide box fallback)
-                    masked_segment = segment
+            all_bboxes_with_types.append(((char_bbox, char_color), 'char', x1))
+        
+        # Sort all bounding boxes by x_min coordinate (ascending order)
+        all_bboxes_with_types.sort(key=lambda x: x[2])
+        
+        # Assign ranks and process segments
+        segment_count = 0
+        for rank, (bbox_data, bbox_type, x_min) in enumerate(all_bboxes_with_types):
+            if bbox_type == 'valid':
+                valid_bbox = bbox_data
+                x1, y1, x2, y2, _, _ = valid_bbox
                 
-                segment_filename = f"char_{i:03d}.png"
-                segment_path = image_segments_folder / segment_filename
-                cv2.imwrite(str(segment_path), masked_segment)
-                segment_count += 1
+                # Apply padding with bounds checking
+                x1_padded = max(0, x1 - segment_padding)
+                y1_padded = max(0, y1 - segment_padding)
+                x2_padded = min(img_width - 1, x2 + segment_padding)
+                y2_padded = min(img_height - 1, y2 + segment_padding)
+                
+                # Extract segment
+                segment = image[y1_padded:y2_padded+1, x1_padded:x2_padded+1]
+                
+                if segment.size > 0:
+                    # Apply black threshold filtering to make dark pixels white
+                    processed_segment = apply_black_threshold_to_segment(segment, black_threshold)
+
+                    # Apply white color mask only if color flag is False
+                    if not color_flag:
+                        processed_segment = create_color_mask_white(processed_segment, white_threshold)
+                    
+                    segment_filename = f"{rank:03d}_valid.png"
+                    segment_path = image_segments_folder / segment_filename
+                    cv2.imwrite(str(segment_path), processed_segment)
+                    segment_count += 1
+                    
+            elif bbox_type == 'char':
+                char_bbox, char_color = bbox_data
+                x1, y1, x2, y2 = char_bbox
+                print(f"Processing character bbox rank {rank}: ({x1}, {y1}, {x2}, {y2}) with color {char_color}")
+                
+                # Apply padding with bounds checking
+                x1_padded = max(0, x1 - segment_padding)
+                y1_padded = max(0, y1 - segment_padding)
+                x2_padded = min(img_width - 1, x2 + segment_padding)
+                y2_padded = min(img_height - 1, y2 + segment_padding)
+                
+                # Extract segment
+                segment = image[y1_padded:y2_padded+1, x1_padded:x2_padded+1]
+                
+                if segment.size > 0:
+                    # Apply color masking only if a specific color was detected
+                    if char_color is not None:
+                        masked_segment = apply_color_mask_to_segment(segment, char_color, wide_box_color_threshold)
+                    else:
+                        # No specific color detected, use original segment (from wide box fallback)
+                        masked_segment = segment
+                    
+                    # Apply black threshold filtering to make dark pixels white
+                    masked_segment = apply_black_threshold_to_segment(masked_segment, black_threshold)
+
+                    # Apply white color mask only if color flag is False
+                    if not color_flag:
+                        masked_segment = create_color_mask_white(masked_segment, white_threshold)
+
+                    segment_filename = f"{rank:03d}_char.png"
+                    segment_path = image_segments_folder / segment_filename
+                    cv2.imwrite(str(segment_path), masked_segment)
+                    segment_count += 1
         
         # Return all bounding boxes for further processing
         return True, valid_bboxes, wide_bboxes, all_wide_char_bboxes, all_wide_char_colors
@@ -494,35 +412,22 @@ def process_image_wrapper(args_tuple):
     (image_file, output_path, white_threshold, black_threshold, kernel_size, stride, 
      min_area, width_threshold, segment_padding, color_mask_threshold, 
      wide_box_color_threshold, size_multiplier, size_ratio_threshold, 
-     large_box_ratio, color_difference_threshold) = args_tuple
+     large_box_ratio, color_difference_threshold, stroke_width_ratio_threshold, color_flag) = args_tuple
     
     return process_single_image(
         image_file, output_path, white_threshold, black_threshold, kernel_size, 
         stride, min_area, width_threshold, segment_padding, color_mask_threshold, 
         wide_box_color_threshold, size_multiplier, size_ratio_threshold, 
-        large_box_ratio, color_difference_threshold
+        large_box_ratio, color_difference_threshold, stroke_width_ratio_threshold, color_flag
     )
 
-def process_images(input_folder, output_folder, white_threshold=200, black_threshold=50, kernel_size=3, stride=3, min_area=100, width_threshold=1.1, segment_padding=3, color_mask_threshold=70, wide_box_color_threshold=30, size_multiplier=2.0, size_ratio_threshold=0.5, large_box_ratio=2.0, color_difference_threshold=50.0, num_workers=None):
+def process_images(input_folder, output_folder, white_threshold=200, black_threshold=50, 
+                   kernel_size=3, stride=3, min_area=100, width_threshold=1.1, segment_padding=3, 
+                   color_mask_threshold=70, wide_box_color_threshold=30, size_multiplier=2.0, 
+                   size_ratio_threshold=0.5, large_box_ratio=2.0, color_difference_threshold=50.0, 
+                   stroke_width_ratio_threshold=0.3, color_flag=False, num_workers=None):
     """
     Process all images in the input folder using multiprocessing.
-    
-    Args:
-        input_folder: Path to input folder containing images
-        output_folder: Path to output folder for masks
-        white_threshold: White threshold value
-        black_threshold: Black threshold value
-        kernel_size: Kernel size for smoothening
-        stride: Stride for smoothening
-        min_area: Minimum area for connected components
-        width_threshold: Threshold for filtering wide bounding boxes (width > height * threshold)
-        segment_padding: Padding for image segmentation
-        color_mask_threshold: Threshold for color masking in character segments
-        wide_box_color_threshold: Threshold for color masking when segmenting wide boxes
-        size_ratio_threshold: Minimum ratio of box area to median area to keep boxes
-        large_box_ratio: Maximum ratio of box area to median area to keep boxes
-        color_difference_threshold: Color difference threshold for reclassifying valid boxes as wide boxes
-        num_workers: Number of worker processes to use (default: use all CPU cores)
     """
     input_path = Path(input_folder)
     output_path = Path(output_folder)
@@ -534,7 +439,6 @@ def process_images(input_folder, output_folder, white_threshold=200, black_thres
     
     # Create output folder
     output_path.mkdir(parents=True, exist_ok=True)
-    
     print(f"Output folder: {output_path}")
     
     # Supported image extensions
@@ -544,14 +448,10 @@ def process_images(input_folder, output_folder, white_threshold=200, black_thres
     image_files = []
     for ext in image_extensions:
         image_files.extend(input_path.glob(f"*{ext}"))
-        image_files.extend(input_path.glob(f"*{ext.upper()}"))
     
     if not image_files:
         print(f"No image files found in '{input_folder}'")
         return
-    
-    # Sort image files for consistent processing order
-    image_files = sorted(image_files)
     
     # Determine number of workers
     if num_workers is None:
@@ -572,7 +472,7 @@ def process_images(input_folder, output_folder, white_threshold=200, black_thres
             image_file, output_path, white_threshold, black_threshold, kernel_size, 
             stride, min_area, width_threshold, segment_padding, color_mask_threshold, 
             wide_box_color_threshold, size_multiplier, size_ratio_threshold, 
-            large_box_ratio, color_difference_threshold
+            large_box_ratio, color_difference_threshold, stroke_width_ratio_threshold, color_flag
         )
         args_list.append(args_tuple)
     
@@ -582,32 +482,39 @@ def process_images(input_folder, output_folder, white_threshold=200, black_thres
     all_wide_bboxes = []
     all_wide_char_bboxes = []
     
+    
     if num_workers == 1:
-        # Process sequentially if only 1 worker specified
-        for args_tuple in args_list:
+        # Sequential version
+        for args_tuple in tqdm(args_list, desc="Processing images", unit="img"):
             success, valid_bboxes, wide_bboxes, wide_char_bboxes, wide_char_colors = process_image_wrapper(args_tuple)
             if success:
                 successful += 1
                 image_file = args_tuple[0]
-                # Store bounding boxes with image filename for reference
                 all_valid_bboxes.extend([(image_file.name, bbox) for bbox in valid_bboxes])
                 all_wide_bboxes.extend([(image_file.name, bbox) for bbox in wide_bboxes])
-                all_wide_char_bboxes.extend([(image_file.name, bbox, color) for bbox, color in zip(wide_char_bboxes, wide_char_colors)])
+                all_wide_char_bboxes.extend(
+                    [(image_file.name, bbox, color) for bbox, color in zip(wide_char_bboxes, wide_char_colors)]
+                )
     else:
-        # Process in parallel using multiprocessing
+        # Parallel version
         with Pool(processes=num_workers) as pool:
-            results = pool.map(process_image_wrapper, args_list)
-        
-        # Collect results
-        for i, (success, valid_bboxes, wide_bboxes, wide_char_bboxes, wide_char_colors) in enumerate(results):
-            if success:
-                successful += 1
-                image_file = image_files[i]
-                # Store bounding boxes with image filename for reference
-                all_valid_bboxes.extend([(image_file.name, bbox) for bbox in valid_bboxes])
-                all_wide_bboxes.extend([(image_file.name, bbox) for bbox in wide_bboxes])
-                all_wide_char_bboxes.extend([(image_file.name, bbox, color) for bbox, color in zip(wide_char_bboxes, wide_char_colors)])
-    
+            # tqdm updates as each result arrives
+            for i, result in enumerate(
+                tqdm(pool.imap_unordered(process_image_wrapper, args_list),
+                    total=len(args_list),
+                    desc="Processing images",
+                    unit="img")
+            ):
+                success, valid_bboxes, wide_bboxes, wide_char_bboxes, wide_char_colors = result
+                if success:
+                    successful += 1
+                    image_file = image_files[i]
+                    all_valid_bboxes.extend([(image_file.name, bbox) for bbox in valid_bboxes])
+                    all_wide_bboxes.extend([(image_file.name, bbox) for bbox in wide_bboxes])
+                    all_wide_char_bboxes.extend(
+                        [(image_file.name, bbox, color) for bbox, color in zip(wide_char_bboxes, wide_char_colors)]
+                    )
+                    
     print("-" * 50)
     print(f"Processing complete: {successful}/{len(image_files)} images processed successfully")
     print(f"Total valid bounding boxes: {len(all_valid_bboxes)}")
@@ -615,6 +522,7 @@ def process_images(input_folder, output_folder, white_threshold=200, black_thres
     print(f"Total extracted character bounding boxes: {len(all_wide_char_bboxes)}")
     
     return all_valid_bboxes, all_wide_bboxes, all_wide_char_bboxes
+
 
 def main():
     parser = argparse.ArgumentParser(description="Process images to create color masks")
@@ -628,24 +536,28 @@ def main():
                        help="Kernel size for smoothening (default: 3)")
     parser.add_argument("-s", "--stride", type=int, default=3,
                        help="Stride for smoothening (default: 3)")
-    parser.add_argument("-m", "--min-area", type=int, default=50,
-                       help="Minimum area for connected components (default: 50)")
+    parser.add_argument("-m", "--min-area", type=int, default=40,
+                       help="Minimum area for connected components (default: 40)")
     parser.add_argument("-t", "--width-threshold", type=float, default=1.1,
                        help="Width threshold for filtering wide bounding boxes (width > height * threshold) (default: 1.1)")
     parser.add_argument("-p", "--segment-padding", type=int, default=3,
                        help="Padding for image segmentation (default: 3 pixels)")
-    parser.add_argument("-c", "--color-mask-threshold", type=int, default=70,
-                       help="Color similarity threshold for masking character segments (default: 70)")
+    parser.add_argument("-c", "--color-mask-threshold", type=int, default=30,
+                       help="Color similarity threshold for masking character segments (default: 30)")
     parser.add_argument("--wide-box-color-threshold", type=int, default=30,
                        help="Color similarity threshold for masking when segmenting wide boxes (default: 30)")
     parser.add_argument("-mul", type=float, default=2.0,
                        help="Size multiplier for filtering large colored boxes (default: 2.0)")
-    parser.add_argument("--size-ratio-threshold", type=float, default=0.5,
-                       help="Minimum ratio of box area to median area to keep boxes (default: 0.5)")
-    parser.add_argument("--large-box-ratio", type=float, default=2.0,
-                       help="Maximum ratio of box area to median area to keep boxes (default: 2.0)")
+    parser.add_argument("--size-ratio-threshold", type=float, default=0.4,
+                       help="Minimum ratio of box area to median area to keep boxes (default: 0.4)")
+    parser.add_argument("--large-box-ratio", type=float, default=2.5,
+                       help="Maximum ratio of box area to median area to keep boxes (default: 2.5)")
     parser.add_argument("--color-difference-threshold", type=float, default=50.0,
                        help="Color difference threshold for reclassifying valid boxes as wide boxes (default: 50.0)")
+    parser.add_argument("--stroke-width-ratio-threshold", type=float, default=0.1,
+                       help="Maximum ratio of box stroke width to median stroke width to keep boxes (boxes with stroke width < median * threshold are kept) (default: 0.1)")
+    parser.add_argument("--color", action="store_true", default=False,
+                       help="Enable color output (skip white color mask application) (default: False)")
     parser.add_argument("-j", "--workers", type=int, default=None,
                        help="Number of worker processes to use for parallel processing (default: use all CPU cores)")
     
@@ -700,6 +612,10 @@ def main():
         print("Error: Wide box color threshold must be a positive number")
         return
     
+    if args.stroke_width_ratio_threshold <= 0:
+        print("Error: Stroke width ratio threshold must be a positive number")
+        return
+    
     if args.workers is not None and args.workers < 1:
         print("Error: Number of workers must be at least 1")
         return
@@ -722,16 +638,23 @@ def main():
     print(f"Size ratio threshold: {args.size_ratio_threshold}")
     print(f"Large box ratio: {args.large_box_ratio}")
     print(f"Color difference threshold: {args.color_difference_threshold}")
+    print(f"Stroke width ratio threshold: {args.stroke_width_ratio_threshold}")
+    print(f"Color flag: {args.color}")
     print("=" * 50)
     
     # Process images
-    valid_bboxes, wide_bboxes, wide_char_bboxes = process_images(args.input_folder, args.output, args.white_threshold, args.black_threshold, args.kernel_size, args.stride, args.min_area, args.width_threshold, args.segment_padding, args.color_mask_threshold, args.wide_box_color_threshold, args.mul, args.size_ratio_threshold, args.large_box_ratio, args.color_difference_threshold, num_workers)
+    valid_bboxes, wide_bboxes, wide_char_bboxes = process_images(
+        args.input_folder, args.output, args.white_threshold, args.black_threshold, 
+        args.kernel_size, args.stride, args.min_area, args.width_threshold, args.segment_padding, 
+        args.color_mask_threshold, args.wide_box_color_threshold, args.mul, 
+        args.size_ratio_threshold, args.large_box_ratio, args.color_difference_threshold, 
+        args.stroke_width_ratio_threshold, args.color, num_workers)
     
     # Save hyperparameters to JSON file
     if valid_bboxes is not None and wide_bboxes is not None and wide_char_bboxes is not None:
         # Calculate successful images by counting unique image names
         successful_images = len(set([bbox[0] for bbox in valid_bboxes + wide_bboxes + wide_char_bboxes])) if (valid_bboxes or wide_bboxes or wide_char_bboxes) else 0
-        save_unclear_processing_parameters_to_json(
+        save_processing_parameters_to_json(
             args, 
             args.output, 
             successful_images,

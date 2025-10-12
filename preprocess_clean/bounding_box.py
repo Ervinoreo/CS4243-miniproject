@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 from collections import deque
+from color_analysis import is_similar_color
+
 
 
 class UnionFind:
@@ -76,60 +78,7 @@ class UnionFind:
                 groups[root] = []
             groups[root].append(i)
         return groups
-
-def is_similar_color(color1, color2, threshold):
-    """
-    Check if two colors are similar within the threshold.
     
-    Args:
-        color1, color2: Colors in BGR format
-        threshold: Color similarity threshold
-    
-    Returns:
-        Boolean indicating if colors are similar
-    """
-    return np.linalg.norm(color1 - color2) <= threshold
-
-def calculate_distance(point1, point2):
-    """
-    Calculate Euclidean distance between two points.
-    
-    Args:
-        point1, point2: Tuples of (x, y) coordinates
-    
-    Returns:
-        Euclidean distance
-    """
-    return np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
-
-
-def get_bounding_box_from_component(component, padding=0, image_shape=None):
-    """Get bounding box from a connected component with padding."""
-    if not component:
-        return None
-    
-    y_coords = [pos[0] for pos in component]
-    x_coords = [pos[1] for pos in component]
-    
-    y_min, y_max = min(y_coords), max(y_coords)
-    x_min, x_max = min(x_coords), max(x_coords)
-    
-    if image_shape:
-        height, width = image_shape
-        x_min = max(0, x_min - padding)
-        y_min = max(0, y_min - padding)
-        x_max = min(width - 1, x_max + padding)
-        y_max = min(height - 1, y_max + padding)
-    else:
-        x_min = max(0, x_min - padding)
-        y_min = max(0, y_min - padding)
-        x_max = x_max + padding
-        y_max = y_max + padding
-    
-    return (x_min, y_min, x_max, y_max)
-
-
-
 def get_centroid_from_bbox(bbox):
     """Get centroid coordinates from bounding box."""
     x_min, y_min, x_max, y_max = bbox
@@ -137,6 +86,16 @@ def get_centroid_from_bbox(bbox):
     center_y = (y_min + y_max) / 2
     return (center_x, center_y)
 
+def calculate_distance(point1, point2):
+    """
+    Calculate Euclidean distance between two points.
+    """
+    return np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
+
+def get_bbox_area(bbox):
+    """Calculate the area of a bounding box."""
+    x_min, y_min, x_max, y_max = bbox
+    return (x_max - x_min) * (y_max - y_min)
 
 def is_bbox_nested(bbox1, bbox2):
     """Check if bbox1 is nested within bbox2."""
@@ -145,77 +104,6 @@ def is_bbox_nested(bbox1, bbox2):
     
     return (x2_min <= x1_min <= x1_max <= x2_max and 
             y2_min <= y1_min <= y1_max <= y2_max)
-
-
-def get_bbox_area(bbox):
-    """Calculate the area of a bounding box."""
-    x_min, y_min, x_max, y_max = bbox
-    return (x_max - x_min) * (y_max - y_min)
-
-
-def dfs_connected_component(mask, start_y, start_x, visited):
-    """
-    Perform DFS to find all connected pixels of the same component.
-    
-    Args:
-        mask: Binary mask
-        start_y, start_x: Starting position
-        visited: Visited positions set
-    
-    Returns:
-        List of (y, x) coordinates in the connected component
-    """
-    height, width = mask.shape
-    component = []
-    stack = deque([(start_y, start_x)])
-    
-    # 8-connectivity directions
-    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-    
-    while stack:
-        y, x = stack.pop()
-        
-        if (y, x) in visited or y < 0 or y >= height or x < 0 or x >= width:
-            continue
-            
-        if not mask[y, x]:
-            continue
-            
-        visited.add((y, x))
-        component.append((y, x))
-        
-        # Add neighbors to stack
-        for dy, dx in directions:
-            new_y, new_x = y + dy, x + dx
-            if (new_y, new_x) not in visited:
-                stack.append((new_y, new_x))
-    
-    return component
-
-
-def find_connected_components(mask, min_component_size=10):
-    """
-    Find all connected components in the mask using DFS.
-    
-    Args:
-        mask: Binary mask
-        min_component_size: Minimum size for a component to be considered
-    
-    Returns:
-        List of components, each component is a list of (y, x) coordinates
-    """
-    height, width = mask.shape
-    visited = set()
-    components = []
-    
-    for y in range(height):
-        for x in range(width):
-            if mask[y, x] and (y, x) not in visited:
-                component = dfs_connected_component(mask, y, x, visited)
-                if len(component) >= min_component_size:
-                    components.append(component)
-    
-    return components
 
 def merge_nearby_components(bounding_boxes, colors, color_threshold, distance_threshold):
     """Merge nearby connected components that have similar colors."""
@@ -424,37 +312,6 @@ def filter_boxes_by_size(bounding_boxes, colors, size_ratio_threshold=0.5, large
     return filtered_boxes, filtered_colors
 
 
-
-def calculate_non_white_pixel_density(image, bbox, white_threshold=245):
-    """
-    Calculate the percentage of non-white pixels in a bounding box region.
-    
-    Args:
-        image: Input image (BGR format)
-        bbox: Bounding box coordinates (x_min, y_min, x_max, y_max)
-        white_threshold: Threshold to consider a pixel as white
-    
-    Returns:
-        Percentage of non-white pixels (0.0 to 1.0)
-    """
-    x_min, y_min, x_max, y_max = bbox
-    
-    # Extract the region of interest
-    roi = image[y_min:y_max+1, x_min:x_max+1]
-    
-    if roi.size == 0:
-        return 0.0
-    
-    # Convert to grayscale for easier white detection
-    gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    
-    # Count non-white pixels (pixels below the white threshold)
-    non_white_pixels = np.sum(gray_roi < white_threshold)
-    total_pixels = gray_roi.size
-    
-    return non_white_pixels / total_pixels if total_pixels > 0 else 0.0
-
-
 def filter_boxes_by_pixel_density(image, bounding_boxes, colors, density_ratio_threshold=0.25, white_threshold=245):
     """Filter out bounding boxes with significantly lower non-white pixel count."""
     if not bounding_boxes:
@@ -531,25 +388,186 @@ def filter_large_colored_boxes(bounding_boxes, colors, box_types, all_bboxes, si
     
     return filtered_boxes, filtered_colors, filtered_types
 
-
-def draw_bounding_boxes(image, bounding_boxes, colors):
+def calculate_stroke_width_transform(gray_image: np.ndarray):
     """
-    Draw bounding boxes on image for debugging.
+    Calculate Mean Stroke Width using a simplified SWT approach.
     
     Args:
-        image: Input image
-        bounding_boxes: List of bounding box coordinates
-        colors: List of colors corresponding to each box
+        gray_image (np.ndarray): Grayscale image
+        
+    Returns:
+        Dict[str, float]: Dictionary containing stroke width statistics
+    """
+    # Apply edge detection
+    edges = cv2.Canny(gray_image, 50, 150)
+    
+    # Apply morphological operations to connect nearby edges
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+    
+    # Calculate distance transform
+    # Invert the image so that text pixels are white
+    inverted = cv2.bitwise_not(gray_image)
+    
+    # Threshold to get binary image (assuming dark text on light background)
+    _, binary = cv2.threshold(inverted, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Calculate distance transform
+    dist_transform = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
+    
+    # Find stroke widths by looking at distances from text pixels to edges
+    stroke_widths = []
+    
+    # Find contours to identify text regions
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    for contour in contours:
+        # Filter small contours (noise)
+        if cv2.contourArea(contour) > 50:  # Minimum area threshold
+            # Create mask for this contour
+            mask = np.zeros(gray_image.shape, dtype=np.uint8)
+            cv2.fillPoly(mask, [contour], 255)
+            
+            # Get distance values within this contour
+            distances = dist_transform[mask > 0]
+            if len(distances) > 0:
+                # The stroke width is approximately 2 * distance transform value
+                # (distance to nearest background pixel)
+                stroke_width = np.mean(distances) * 2
+                stroke_widths.append(stroke_width)
+    
+    if stroke_widths:
+        mean_stroke_width = np.mean(stroke_widths)
+        std_stroke_width = np.std(stroke_widths)
+        median_stroke_width = np.median(stroke_widths)
+        
+        # Classify stroke thickness
+        if mean_stroke_width < 3:
+            thickness_level = "Very Thin"
+        elif mean_stroke_width < 5:
+            thickness_level = "Thin"
+        elif mean_stroke_width < 8:
+            thickness_level = "Medium"
+        elif mean_stroke_width < 12:
+            thickness_level = "Thick"
+        else:
+            thickness_level = "Very Thick"
+    else:
+        mean_stroke_width = 0
+        std_stroke_width = 0
+        median_stroke_width = 0
+        thickness_level = "No Text Detected"
+    
+    return {
+        'mean_stroke_width': mean_stroke_width,
+        'std_stroke_width': std_stroke_width,
+        'median_stroke_width': median_stroke_width,
+        'thickness_level': thickness_level,
+        'num_text_regions': len(stroke_widths)
+    }
+
+def calculate_stroke_width_for_bbox(image, bbox):
+    """
+    Calculate the stroke width for a specific bounding box using simplified SWT approach.
+    
+    Args:
+        image: Input BGR image
+        bbox: Bounding box coordinates (x_min, y_min, x_max, y_max)
     
     Returns:
-        Image with bounding boxes drawn
+        float: Mean stroke width for the bounding box region, or 0 if no text detected
     """
-    debug_image = image.copy()
+    x_min, y_min, x_max, y_max = bbox[:4]
     
-    for i, (bbox, color) in enumerate(zip(bounding_boxes, colors)):
-        if bbox is not None:
-            x_min, y_min, x_max, y_max = bbox
-            # Draw rectangle with the detected color
-            cv2.rectangle(debug_image, (x_min, y_min), (x_max, y_max), color.tolist(), 2)
+    # Extract the ROI from the image
+    roi = image[y_min:y_max+1, x_min:x_max+1]
     
-    return debug_image
+    if roi.size == 0:
+        return 0
+    
+    # Convert to grayscale
+    gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+
+    stroke_width_info = calculate_stroke_width_transform(gray_roi)
+
+    return stroke_width_info['mean_stroke_width']
+
+
+def filter_boxes_by_stroke_width(image, valid_bboxes, char_bboxes, char_colors, 
+                                 stroke_width_ratio_threshold=0.1, wide_box_color_threshold=30):
+    """
+    Filter bounding boxes based on stroke width compared to median stroke width.
+    
+    Args:
+        image: Input BGR image
+        valid_bboxes: List of valid bounding boxes (DFS format with 6 elements)
+        char_bboxes: List of character bounding boxes (4 elements format)
+        char_colors: List of colors corresponding to character bounding boxes
+        stroke_width_ratio_threshold: Maximum ratio of box stroke width to median stroke width to keep boxes
+        wide_box_color_threshold: Color threshold for masking when processing character boxes
+    
+    Returns:
+        Tuple containing (filtered_valid_bboxes, filtered_char_bboxes, filtered_char_colors)
+    """
+    from color_analysis import apply_color_mask_to_segment
+    
+    stroke_width_filtered_valid_bboxes = []
+    stroke_width_filtered_char_bboxes = []
+    stroke_width_filtered_char_colors = []
+    
+    # Calculate stroke widths for all bounding boxes
+    all_stroke_widths = []
+    
+    # Calculate stroke widths for valid bboxes (no color masking needed)
+    valid_stroke_widths = []
+    for valid_bbox in valid_bboxes:
+        x1, y1, x2, y2, _, _ = valid_bbox
+        bbox_coords = (x1, y1, x2, y2)
+        stroke_width = calculate_stroke_width_for_bbox(image, bbox_coords)
+        valid_stroke_widths.append(stroke_width)
+        all_stroke_widths.append(stroke_width)
+    
+    # Calculate stroke widths for character bboxes (apply color masking first)
+    char_stroke_widths = []
+    for char_bbox, char_color in zip(char_bboxes, char_colors):
+        x1, y1, x2, y2 = char_bbox
+        
+        # Extract the segment
+        segment = image[y1:y2+1, x1:x2+1]
+        
+        if segment.size > 0:
+            # Apply color masking if a specific color was detected
+            if char_color is not None:
+                masked_segment = apply_color_mask_to_segment(segment, char_color, wide_box_color_threshold)
+            else:
+                masked_segment = segment
+            
+            # Calculate stroke width on the masked segment
+            stroke_width = calculate_stroke_width_for_bbox(masked_segment, (0, 0, masked_segment.shape[1]-1, masked_segment.shape[0]-1))
+        else:
+            stroke_width = 0
+        
+        char_stroke_widths.append(stroke_width)
+        all_stroke_widths.append(stroke_width)
+    
+    # Calculate median stroke width for filtering
+    if all_stroke_widths:
+        median_stroke_width = np.median([sw for sw in all_stroke_widths if sw > 0])
+        stroke_width_threshold = median_stroke_width * stroke_width_ratio_threshold
+        
+        # Filter valid bboxes based on stroke width
+        for valid_bbox, stroke_width in zip(valid_bboxes, valid_stroke_widths):
+            stroke_width_filtered_valid_bboxes.append(valid_bbox)
+        
+        # Filter character bboxes based on stroke width
+        for char_bbox, char_color, stroke_width in zip(char_bboxes, char_colors, char_stroke_widths):
+            if stroke_width > 0 and stroke_width > stroke_width_threshold:
+                stroke_width_filtered_char_bboxes.append(char_bbox)
+                stroke_width_filtered_char_colors.append(char_color)
+    else:
+        # No valid stroke widths calculated, keep all boxes
+        stroke_width_filtered_valid_bboxes = valid_bboxes
+        stroke_width_filtered_char_bboxes = char_bboxes
+        stroke_width_filtered_char_colors = char_colors
+    
+    return stroke_width_filtered_valid_bboxes, stroke_width_filtered_char_bboxes, stroke_width_filtered_char_colors

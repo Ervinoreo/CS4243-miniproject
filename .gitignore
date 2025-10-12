@@ -8,3 +8,4 @@ big_val_l/
 best.pt
 preprocess/__pycache__/
 logs/
+captcha_detection/
