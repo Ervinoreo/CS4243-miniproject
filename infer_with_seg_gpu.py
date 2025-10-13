@@ -164,7 +164,7 @@ def perform_inference_with_visualization(
                 sorted_indices = np.argsort(boxes[:, 0])
                 
                 segmented_count = 0
-                for rank, box_idx in enumerate(sorted_indices, 1):
+                for rank, box_idx in enumerate(sorted_indices, 0):
                     x1, y1, x2, y2 = boxes[box_idx].astype(int)
                     confidence = confidences[box_idx]
                     
