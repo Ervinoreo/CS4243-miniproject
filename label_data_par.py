@@ -25,8 +25,8 @@ def process_single_folder(item, output_path, lock):
     if folder_name.endswith("-0"):
         name_part = folder_name[:-2]  # Remove "-0" suffix
     else:
-        # If folder doesn't follow the expected format, use the whole name
-        name_part = folder_name
+        # If folder doesn't follow the expected format, skip processing
+        return {"processed": False, "folder_name": folder_name}
     
     # Get all files in the folder
     files = [f for f in item.iterdir() if f.is_file()]
@@ -47,29 +47,40 @@ def process_single_folder(item, output_path, lock):
         # Process each file
         for i, file_path in enumerate(files):
             try:
-                # Get the first 3 characters of the filename (without extension)
+                # Get the filename without extension
                 file_stem = file_path.stem
+                
+                # Extract idx from filename (first 3 characters, e.g., "000" from "000_char.png")
                 idx = file_stem[:3] if len(file_stem) >= 3 else file_stem
                 
-                # Get the character at position i from the folder name
-                if i < len(name_part):
-                    char_i = name_part[i]
-                    
-                    # Create output subfolder named after the character
-                    output_subfolder = output_path / char_i
-                    
-                    # Thread-safe folder creation
+                # Convert idx to integer to get the position in folder name
+                try:
+                    idx_num = int(idx)
+                    if idx_num < len(name_part):
+                        # Get the character at position idx_num from the folder name
+                        char_at_idx = name_part[idx_num]
+                        
+                        # Create output subfolder named after the character
+                        output_subfolder = output_path / char_at_idx
+                        
+                        # Thread-safe folder creation
+                        with lock:
+                            output_subfolder.mkdir(parents=True, exist_ok=True)
+                        
+                        # Create new filename
+                        new_filename = f"{name_part}_{idx}.png"
+                        output_file_path = output_subfolder / new_filename
+                        
+                        # Copy the file to the new location with new name
+                        shutil.copy2(file_path, output_file_path)
+                        
+                        result['files_processed'] += 1
+                    else:
+                        with lock:
+                            print(f"    Skipping {file_path.name}: idx {idx_num} exceeds folder name length {len(name_part)}")
+                except ValueError:
                     with lock:
-                        output_subfolder.mkdir(parents=True, exist_ok=True)
-                    
-                    # Create new filename
-                    new_filename = f"{name_part}_{idx}.png"
-                    output_file_path = output_subfolder / new_filename
-                    
-                    # Copy the file to the new location with new name
-                    shutil.copy2(file_path, output_file_path)
-                    
-                    result['files_processed'] += 1
+                        print(f"    Skipping {file_path.name}: invalid idx '{idx}' (not a number)")
 
             except Exception as e:
                 with lock:
