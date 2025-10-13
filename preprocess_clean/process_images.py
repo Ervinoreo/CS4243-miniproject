@@ -367,7 +367,7 @@ def process_single_image(image_path, output_folder, white_threshold=250, black_t
             elif bbox_type == 'char':
                 char_bbox, char_color = bbox_data
                 x1, y1, x2, y2 = char_bbox
-                print(f"Processing character bbox rank {rank}: ({x1}, {y1}, {x2}, {y2}) with color {char_color}")
+                # print(f"Processing character bbox rank {rank}: ({x1}, {y1}, {x2}, {y2}) with color {char_color}")
                 
                 # Apply padding with bounds checking
                 x1_padded = max(0, x1 - segment_padding)

@@ -121,6 +121,7 @@ def process_folders(input_folder, output_folder, num_threads=4):
     processed_folders = 0
     skipped_folders = 0
     total_files_processed = 0
+    skipped_folder_names = []  # List to track skipped folder names
     
     print(f"Found {total_folders} folders to process using {num_threads} threads...")
     
@@ -147,11 +148,22 @@ def process_folders(input_folder, output_folder, num_threads=4):
                         total_files_processed += result['files_processed']
                     else:
                         skipped_folders += 1
+                        skipped_folder_names.append(result['folder_name'])
                 except Exception as exc:
                     with lock:
                         tqdm.write(f"Folder {folder.name} generated an exception: {exc}")
                 finally:
                     pbar.update(1)
+    
+    # Write skipped folder names to a text file
+    if skipped_folder_names:
+        skipped_file_path = output_path / "skipped_folders.txt"
+        with open(skipped_file_path, 'w') as f:
+            f.write("Skipped folders (length mismatch):\n")
+            f.write("=" * 40 + "\n")
+            for folder_name in sorted(skipped_folder_names):
+                f.write(f"{folder_name}\n")
+        print(f"Skipped folders list saved to: {skipped_file_path}")
     
     # Print summary statistics
     print("=" * 60)
@@ -162,6 +174,8 @@ def process_folders(input_folder, output_folder, num_threads=4):
     print(f"Folders skipped (length mismatch): {skipped_folders}")
     print(f"Total files processed: {total_files_processed}")
     print(f"Output folder: {output_path}")
+    if skipped_folder_names:
+        print(f"Skipped folders list: {output_path / 'skipped_folders.txt'}")
     print("=" * 60)
     
     return {
