@@ -160,11 +160,11 @@ def perform_inference_with_visualization(
                 # Get bounding boxes in xyxy format
                 boxes = detections.xyxy.cpu().numpy()
                 
-                # Sort boxes by x-coordinate (left to right)
+                # Sort boxes by x-coordinate (left to right) - using x_min (first column)
                 sorted_indices = np.argsort(boxes[:, 0])
                 
                 segmented_count = 0
-                for idx, box_idx in enumerate(sorted_indices):
+                for rank, box_idx in enumerate(sorted_indices, 1):
                     x1, y1, x2, y2 = boxes[box_idx].astype(int)
                     confidence = confidences[box_idx]
                     
@@ -178,14 +178,14 @@ def perform_inference_with_visualization(
                     if x2 > x1 and y2 > y1:  # Valid bounding box
                         character_img = original_img[y1:y2, x1:x2]
                         
-                        # Save segmented character
-                        char_filename = f"char_{idx+1:02d}_conf_{confidence:.3f}.png"
+                        # Save segmented character with rank prefix
+                        char_filename = f"{rank:03d}_char_{rank:02d}_conf_{confidence:.3f}.png"
                         char_path = image_output_folder / char_filename
                         
                         if cv2.imwrite(str(char_path), character_img):
                             segmented_count += 1
                         else:
-                            print(f"      ⚠️  Failed to save character {idx+1}")
+                            print(f"      ⚠️  Failed to save character rank {rank}")
                 
                 print(f"   ✅ Detected {num_detections} characters (avg conf: {avg_conf:.3f})")
                 print(f"   ✂️  Segmented {segmented_count} characters")
