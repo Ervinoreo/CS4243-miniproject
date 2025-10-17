@@ -143,6 +143,8 @@ def process_single_image(image_path, output_folder, white_threshold=250, black_t
             print(f"Warning: Could not read image {image_path}")
             return False, [], [], [], []
         
+        num_expected_segments = len(image_path.stem.split('-')[0])
+
         # Create color mask
         mask = create_color_mask_black_white(image, white_threshold, black_threshold)
         
@@ -151,6 +153,78 @@ def process_single_image(image_path, output_folder, white_threshold=250, black_t
         
         # Draw bounding boxes on smoothed mask
         smoothed_mask_with_boxes, num_components, valid_bboxes, wide_bboxes = draw_bounding_boxes_using_dfs(smoothed_mask, min_area, black_threshold, width_threshold)
+
+        if len(valid_bboxes) == num_expected_segments:
+            # # remove boxes by size filtering (convert to x1,y1,x2,y2 format)
+            # valid_bboxes_4coord = [bbox[:4] for bbox in valid_bboxes]
+            # size_filtered_bboxes_4coord, size_filtered_colors = filter_boxes_by_size(
+            #     valid_bboxes_4coord, [None]*len(valid_bboxes), size_ratio_threshold, large_box_ratio
+            # )
+            
+            # # Convert back to full format (x1, y1, x2, y2, width, height)
+            # size_filtered_bboxes = []
+            # for bbox_4coord in size_filtered_bboxes_4coord:
+            #     x1, y1, x2, y2 = bbox_4coord
+            #     width = x2 - x1 + 1
+            #     height = y2 - y1 + 1
+            #     size_filtered_bboxes.append((x1, y1, x2, y2, width, height))
+
+            size_filtered_bboxes = valid_bboxes
+
+            if len(size_filtered_bboxes) == num_expected_segments:
+                print(f"Image {image_path.name}: Found expected number of segments ({num_expected_segments}) after size filtering.")
+                # create the debug image with filtered boxes
+                debug_color_image = image.copy()
+                for valid_bbox in size_filtered_bboxes:
+                    x1, y1, x2, y2 = valid_bbox[:4]
+                    cv2.rectangle(debug_color_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    # Convert original mask to 3-channel for concatenation
+                    mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+                    debug_combined = cv2.hconcat([debug_color_image, mask_3ch])
+                    debug_folder = output_folder / "debug"
+                    debug_folder.mkdir(parents=True, exist_ok=True)
+                    debug_filename = f"{image_path.stem}_size_filtered{image_path.suffix}"
+                    debug_path = debug_folder / debug_filename
+                    cv2.imwrite(debug_path, debug_combined)
+                valid_bboxes = size_filtered_bboxes
+
+                # Sort bounding boxes by x_min coordinate (ascending order) 
+                valid_bboxes_with_x = [(bbox, bbox[0]) for bbox in valid_bboxes]
+                valid_bboxes_with_x.sort(key=lambda x: x[1])
+                sorted_valid_bboxes = [bbox for bbox, x_min in valid_bboxes_with_x]
+
+                # segment the image based on sorted boxes, the naming should follow the rank order
+                img_height, img_width = image.shape[:2]
+                image_segments_folder = output_folder / image_path.stem
+                image_segments_folder.mkdir(parents=True, exist_ok=True)
+                for rank, valid_bbox in enumerate(sorted_valid_bboxes):
+                    x1, y1, x2, y2 = valid_bbox[:4]
+                    
+                    # Apply padding with bounds checking
+                    x1_padded = max(0, x1 - segment_padding)
+                    y1_padded = max(0, y1 - segment_padding)
+                    x2_padded = min(img_width - 1, x2 + segment_padding)
+                    y2_padded = min(img_height - 1, y2 + segment_padding)
+                    
+                    # Extract segment
+                    segment = image[y1_padded:y2_padded+1, x1_padded:x2_padded+1]
+                    
+                    if segment.size > 0:
+                        # Apply black threshold filtering to make dark pixels white
+                        processed_segment = apply_black_threshold_to_segment(segment, black_threshold)
+
+                        # Apply white color mask only if color flag is False
+                        if not color_flag:
+                            processed_segment = create_color_mask_white(processed_segment, white_threshold)
+                        
+                        segment_filename = f"{rank:03d}_valid.png"
+                        segment_path = image_segments_folder / segment_filename
+                        cv2.imwrite(str(segment_path), processed_segment)
+
+
+                # Return early since we have enough valid boxes
+                return True, sorted_valid_bboxes, wide_bboxes, [], []
+            
         
         # Check valid boxes for multiple colors and reclassify as wide boxes if needed
         remaining_valid_bboxes = []
@@ -165,7 +239,7 @@ def process_single_image(image_path, output_folder, white_threshold=250, black_t
         # Update the lists
         valid_bboxes = remaining_valid_bboxes
         wide_bboxes.extend(additional_wide_bboxes)
-        
+
         # Process wide bounding boxes to extract character components
         all_wide_char_bboxes = []
         all_wide_char_colors = []
