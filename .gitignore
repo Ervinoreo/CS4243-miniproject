@@ -9,3 +9,4 @@ best.pt
 preprocess/__pycache__/
 logs/
 captcha_detection/
+char_dataset/
