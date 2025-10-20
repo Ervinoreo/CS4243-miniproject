@@ -339,7 +339,22 @@ class CharacterTrainer:
             for batch in dataloader:
                 if len(batch) == 3:  # Has metadata
                     images, labels, metadata = batch
-                    all_metadata.extend(metadata)
+                    # Debug: print metadata structure
+                    print(f"Metadata type: {type(metadata)}")
+                    if isinstance(metadata, (list, tuple)) and len(metadata) > 0:
+                        print(f"First metadata item type: {type(metadata[0])}")
+                        print(f"First metadata item: {metadata[0]}")
+                    
+                    # Handle different metadata formats
+                    if isinstance(metadata, tuple) and len(metadata) == 3:
+                        # PyTorch collated the metadata into tuple of lists
+                        captcha_ids, positions, true_chars = metadata
+                        batch_metadata = list(zip(captcha_ids, positions, true_chars))
+                    else:
+                        # Metadata is already a list of tuples
+                        batch_metadata = metadata
+                    
+                    all_metadata.extend(batch_metadata)
                 else:
                     images, labels = batch
                 
