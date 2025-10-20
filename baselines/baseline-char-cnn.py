@@ -75,7 +75,7 @@ class CharacterDataProcessor:
         
         images = []
         labels = []
-        metadata = []  # Store (captcha_id, position) for each sample
+        metadata = []  # Store (captcha_id, position, true_char) for each sample
         
         print(f"Loading character data from {data_dir}...")
         
@@ -84,7 +84,7 @@ class CharacterDataProcessor:
             if not char_folder.is_dir() or char_folder.name == 'skipped_folders.txt':
                 continue
                 
-            char_label = char_folder.name
+            char_label = char_folder.name  # This is the true character (e.g., '0', 'a', etc.)
             if char_label not in self.char_to_idx:
                 print(f"Warning: Unknown character class '{char_label}', skipping...")
                 continue
@@ -108,6 +108,7 @@ class CharacterDataProcessor:
                 
                 images.append(processed_img)
                 labels.append(class_idx)
+                # Store the actual character label (from folder name), not the captcha_id
                 metadata.append((captcha_id, position, char_label))
         
         print(f"Loaded {len(images)} character images")
@@ -385,7 +386,21 @@ class CharacterTrainer:
         char_predictions, char_probabilities, char_metadata = self.predict_characters(dataloader, device)
         
         # Character-level evaluation
-        true_char_labels = [processor.char_to_idx[meta[2]] for meta in char_metadata]
+        # The true character labels should come from the actual labels passed to the dataset, not metadata
+        # We need to get them directly from the dataloader
+        true_char_labels = []
+        
+        # Re-iterate through dataloader to get true labels
+        self.model.eval()
+        with torch.no_grad():
+            for batch in dataloader:
+                if len(batch) == 3:
+                    images, labels, metadata = batch
+                else:
+                    images, labels = batch
+                
+                true_char_labels.extend(labels.cpu().numpy())
+        
         char_accuracy = accuracy_score(true_char_labels, char_predictions)
         
         # Calculate precision, recall, F1 for character level
