@@ -156,6 +156,20 @@ class CharacterDataset(Dataset):
         else:
             return image, label
 
+def collate_fn_with_metadata(batch):
+    """Custom collate function to handle metadata properly"""
+    if len(batch[0]) == 3:  # Has metadata
+        images, labels, metadata = zip(*batch)
+        images = torch.stack(images)
+        labels = torch.stack(labels)
+        # Keep metadata as list of tuples
+        return images, labels, list(metadata)
+    else:  # No metadata
+        images, labels = zip(*batch)
+        images = torch.stack(images)
+        labels = torch.stack(labels)
+        return images, labels
+
 class CharacterCNN(nn.Module):
     """CNN Model for Individual Character Classification"""
     
@@ -374,8 +388,19 @@ class CharacterTrainer:
         """Aggregate character predictions to CAPTCHA-level predictions"""
         captcha_predictions = defaultdict(list)
         
+        # Handle the collated metadata format from DataLoader
+        # char_metadata is a list of tuples when collected from DataLoader
+        if len(char_metadata) > 0 and isinstance(char_metadata[0], tuple) and len(char_metadata[0]) == 3:
+            # Direct tuple format: [(captcha_id, position, true_char), ...]
+            metadata_items = char_metadata
+        else:
+            # This shouldn't happen with our current setup, but handle it just in case
+            print(f"Unexpected metadata format: {type(char_metadata)}")
+            print(f"First item: {char_metadata[0] if char_metadata else 'None'}")
+            return {}, {}
+        
         # Group predictions by CAPTCHA ID
-        for pred, (captcha_id, position, true_char) in zip(char_predictions, char_metadata):
+        for pred, (captcha_id, position, true_char) in zip(char_predictions, metadata_items):
             predicted_char = processor.idx_to_char[pred]
             captcha_predictions[captcha_id].append((position, predicted_char, true_char))
         
@@ -487,6 +512,16 @@ def visualize_character_predictions(X_test, y_test, predictions, processor, num_
     plt.close()
     print("Character predictions saved to './character_predictions.png'")
 
+def character_collate_fn(batch):
+    """Custom collate function to handle metadata tuples properly"""
+    # Check if we have metadata
+    if len(batch[0]) == 4:  # (image, label, captcha_id, position)
+        images, labels, captcha_ids, positions = zip(*batch)
+        return (torch.stack(images), torch.tensor(labels), captcha_ids, positions)
+    else:  # (image, label)
+        images, labels = zip(*batch)
+        return (torch.stack(images), torch.tensor(labels))
+
 def main():
     """Main function"""
     # Configuration
@@ -523,9 +558,9 @@ def main():
     val_dataset = CharacterDataset(X_val, y_val, meta_val)
     test_dataset = CharacterDataset(X_test, y_test, meta_test)
     
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=character_collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=character_collate_fn)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=character_collate_fn)
     
     # Build model
     print("\nBuilding model...")
