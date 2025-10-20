@@ -75,7 +75,7 @@ class CharacterDataProcessor:
         
         images = []
         labels = []
-        metadata = []  # Store (captcha_id, position, true_char) for each sample
+        image_paths = []  # Store paths for filename-based evaluation
         
         print(f"Loading character data from {data_dir}...")
         
@@ -101,15 +101,9 @@ class CharacterDataProcessor:
                 if processed_img is None:
                     continue
                 
-                # Parse filename for metadata
-                captcha_id, position = self.parse_filename(img_path.name)
-                if captcha_id is None:
-                    continue
-                
                 images.append(processed_img)
                 labels.append(class_idx)
-                # Store the actual character label (from folder name), not the captcha_id
-                metadata.append((captcha_id, position, char_label))
+                image_paths.append(str(img_path))  # Store full path for evaluation
         
         print(f"Loaded {len(images)} character images")
         print(f"Character distribution:")
@@ -120,20 +114,20 @@ class CharacterDataProcessor:
         
         if split_validation:
             # Split into train and validation sets
-            X_train, X_val, y_train, y_val, meta_train, meta_val = train_test_split(
-                images, labels, metadata, test_size=0.2, random_state=42, stratify=labels
+            X_train, X_val, y_train, y_val, paths_train, paths_val = train_test_split(
+                images, labels, image_paths, test_size=0.2, random_state=42, stratify=labels
             )
-            return X_train, X_val, y_train, y_val, meta_train, meta_val
+            return X_train, X_val, y_train, y_val, paths_train, paths_val
         else:
-            return images, labels, metadata
+            return images, labels, image_paths
 
 class CharacterDataset(Dataset):
     """PyTorch Dataset for individual character images"""
     
-    def __init__(self, images, labels, metadata=None, transform=None):
+    def __init__(self, images, labels, image_paths=None, transform=None):
         self.images = images
         self.labels = labels
-        self.metadata = metadata
+        self.image_paths = image_paths  # Store paths for filename-based evaluation
         self.transform = transform
     
     def __len__(self):
@@ -151,24 +145,14 @@ class CharacterDataset(Dataset):
         
         label = torch.LongTensor([label])[0]  # Convert to scalar tensor
         
-        if self.metadata:
-            return image, label, self.metadata[idx]
-        else:
-            return image, label
+        return image, label
 
-def collate_fn_with_metadata(batch):
-    """Custom collate function to handle metadata properly"""
-    if len(batch[0]) == 3:  # Has metadata
-        images, labels, metadata = zip(*batch)
-        images = torch.stack(images)
-        labels = torch.stack(labels)
-        # Keep metadata as list of tuples
-        return images, labels, list(metadata)
-    else:  # No metadata
-        images, labels = zip(*batch)
-        images = torch.stack(images)
-        labels = torch.stack(labels)
-        return images, labels
+def simple_collate_fn(batch):
+    """Simple collate function without metadata complexity"""
+    images, labels = zip(*batch)
+    images = torch.stack(images)
+    labels = torch.stack(labels)
+    return images, labels
 
 class CharacterCNN(nn.Module):
     """CNN Model for Individual Character Classification"""
@@ -347,31 +331,10 @@ class CharacterTrainer:
         self.model.eval()
         all_predictions = []
         all_probabilities = []
-        all_metadata = []
         
         with torch.no_grad():
             for batch in dataloader:
-                if len(batch) == 3:  # Has metadata
-                    images, labels, metadata = batch
-                    # Debug: print metadata structure
-                    print(f"Metadata type: {type(metadata)}")
-                    if isinstance(metadata, (list, tuple)) and len(metadata) > 0:
-                        print(f"First metadata item type: {type(metadata[0])}")
-                        print(f"First metadata item: {metadata[0]}")
-                    
-                    # Handle different metadata formats
-                    if isinstance(metadata, tuple) and len(metadata) == 3:
-                        # PyTorch collated the metadata into tuple of lists
-                        captcha_ids, positions, true_chars = metadata
-                        batch_metadata = list(zip(captcha_ids, positions, true_chars))
-                    else:
-                        # Metadata is already a list of tuples
-                        batch_metadata = metadata
-                    
-                    all_metadata.extend(batch_metadata)
-                else:
-                    images, labels = batch
-                
+                images, labels = batch
                 images = images.to(device)
                 
                 # Forward pass
@@ -382,26 +345,28 @@ class CharacterTrainer:
                 all_predictions.extend(predictions.cpu().numpy())
                 all_probabilities.extend(probabilities.cpu().numpy())
         
-        return all_predictions, all_probabilities, all_metadata
+        return all_predictions, all_probabilities
     
-    def aggregate_to_captcha_predictions(self, char_predictions, char_metadata, processor):
-        """Aggregate character predictions to CAPTCHA-level predictions"""
+    def aggregate_to_captcha_predictions(self, char_predictions, image_paths, processor):
+        """Aggregate character predictions to CAPTCHA-level predictions using filenames"""
         captcha_predictions = defaultdict(list)
         
-        # Handle the collated metadata format from DataLoader
-        # char_metadata is a list of tuples when collected from DataLoader
-        if len(char_metadata) > 0 and isinstance(char_metadata[0], tuple) and len(char_metadata[0]) == 3:
-            # Direct tuple format: [(captcha_id, position, true_char), ...]
-            metadata_items = char_metadata
-        else:
-            # This shouldn't happen with our current setup, but handle it just in case
-            print(f"Unexpected metadata format: {type(char_metadata)}")
-            print(f"First item: {char_metadata[0] if char_metadata else 'None'}")
-            return {}, {}
-        
-        # Group predictions by CAPTCHA ID
-        for pred, (captcha_id, position, true_char) in zip(char_predictions, metadata_items):
+        # Group predictions by CAPTCHA ID using filename parsing
+        for pred, img_path in zip(char_predictions, image_paths):
+            # Extract filename
+            filename = Path(img_path).name
+            
+            # Parse filename to get CAPTCHA ID and position
+            captcha_id, position = processor.parse_filename(filename)
+            if captcha_id is None:
+                continue
+            
+            # Get predicted character
             predicted_char = processor.idx_to_char[pred]
+            
+            # Get true character from folder name (parent directory)
+            true_char = Path(img_path).parent.name
+            
             captcha_predictions[captcha_id].append((position, predicted_char, true_char))
         
         # Sort by position and create final CAPTCHA predictions
@@ -413,34 +378,26 @@ class CharacterTrainer:
             char_data.sort(key=lambda x: x[0])
             
             # Extract predicted and true sequences
-            pred_sequence = ''.join([char_data[i][1] for i in range(len(char_data))])
-            true_sequence = ''.join([char_data[i][2] for i in range(len(char_data))])
+            pred_sequence = ''.join([char_info[1] for char_info in char_data])
+            true_sequence = ''.join([char_info[2] for char_info in char_data])
             
             final_predictions[captcha_id] = pred_sequence
             true_captchas[captcha_id] = true_sequence
         
         return final_predictions, true_captchas
     
-    def evaluate_comprehensive(self, dataloader, processor, device='cpu'):
+    def evaluate_comprehensive(self, test_dataset, processor, device='cpu'):
         """Comprehensive evaluation with both character and CAPTCHA level metrics"""
-        char_predictions, char_probabilities, char_metadata = self.predict_characters(dataloader, device)
+        # Create test dataloader
+        test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, collate_fn=simple_collate_fn)
+        
+        # Get character predictions
+        char_predictions, char_probabilities = self.predict_characters(test_loader, device)
+        
+        # Get true labels from dataset
+        true_char_labels = test_dataset.labels
         
         # Character-level evaluation
-        # The true character labels should come from the actual labels passed to the dataset, not metadata
-        # We need to get them directly from the dataloader
-        true_char_labels = []
-        
-        # Re-iterate through dataloader to get true labels
-        self.model.eval()
-        with torch.no_grad():
-            for batch in dataloader:
-                if len(batch) == 3:
-                    images, labels, metadata = batch
-                else:
-                    images, labels = batch
-                
-                true_char_labels.extend(labels.cpu().numpy())
-        
         char_accuracy = accuracy_score(true_char_labels, char_predictions)
         
         # Calculate precision, recall, F1 for character level
@@ -451,9 +408,9 @@ class CharacterTrainer:
             true_char_labels, char_predictions, average='macro', zero_division=0
         )
         
-        # CAPTCHA-level evaluation
+        # CAPTCHA-level evaluation using image paths
         captcha_predictions, true_captchas = self.aggregate_to_captcha_predictions(
-            char_predictions, char_metadata, processor
+            char_predictions, test_dataset.image_paths, processor
         )
         
         # Calculate CAPTCHA accuracy
@@ -480,7 +437,7 @@ class CharacterTrainer:
             'captcha_correct': correct_captchas,
             'captcha_total': total_captchas,
             'char_predictions': char_predictions,
-            'char_metadata': char_metadata,
+
             'captcha_predictions': captcha_predictions,
             'true_captchas': true_captchas
         }
@@ -512,15 +469,7 @@ def visualize_character_predictions(X_test, y_test, predictions, processor, num_
     plt.close()
     print("Character predictions saved to './character_predictions.png'")
 
-def character_collate_fn(batch):
-    """Custom collate function to handle metadata tuples properly"""
-    # Check if we have metadata
-    if len(batch[0]) == 4:  # (image, label, captcha_id, position)
-        images, labels, captcha_ids, positions = zip(*batch)
-        return (torch.stack(images), torch.tensor(labels), captcha_ids, positions)
-    else:  # (image, label)
-        images, labels = zip(*batch)
-        return (torch.stack(images), torch.tensor(labels))
+
 
 def main():
     """Main function"""
@@ -543,24 +492,23 @@ def main():
     
     # Load training data
     print("\nLoading training data...")
-    X_train, X_val, y_train, y_val, meta_train, meta_val = processor.load_character_data(TRAIN_DIR, split_validation=True)
+    X_train, X_val, y_train, y_val, paths_train, paths_val = processor.load_character_data(TRAIN_DIR, split_validation=True)
     
     print(f"Training set: {len(X_train)} character images")
     print(f"Validation set: {len(X_val)} character images")
     
     # Load test data
     print("\nLoading test data...")
-    X_test, y_test, meta_test = processor.load_character_data(TEST_DIR, split_validation=False)
+    X_test, y_test, paths_test = processor.load_character_data(TEST_DIR, split_validation=False)
     print(f"Test set: {len(X_test)} character images")
     
     # Create datasets and dataloaders
-    train_dataset = CharacterDataset(X_train, y_train, meta_train)
-    val_dataset = CharacterDataset(X_val, y_val, meta_val)
-    test_dataset = CharacterDataset(X_test, y_test, meta_test)
+    train_dataset = CharacterDataset(X_train, y_train, paths_train)
+    val_dataset = CharacterDataset(X_val, y_val, paths_val)
+    test_dataset = CharacterDataset(X_test, y_test, paths_test)
     
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=character_collate_fn)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=character_collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=character_collate_fn)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=simple_collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=simple_collate_fn)
     
     # Build model
     print("\nBuilding model...")
@@ -580,7 +528,7 @@ def main():
     
     # Evaluate on test set
     print("\nEvaluating on test set...")
-    results = trainer.evaluate_comprehensive(test_loader, processor, device)
+    results = trainer.evaluate_comprehensive(test_dataset, processor, device)
     
     print(f"\n{'='*50}")
     print(f"TEST RESULTS")
