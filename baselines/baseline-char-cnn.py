@@ -223,7 +223,13 @@ class CharacterTrainer:
         correct = 0
         total = 0
         
-        for images, labels in tqdm(train_loader, desc="Training"):
+        for batch in tqdm(train_loader, desc="Training"):
+            # Handle both cases: with and without metadata
+            if len(batch) == 3:
+                images, labels, metadata = batch
+            else:
+                images, labels = batch
+                
             images = images.to(self.device)
             labels = labels.to(self.device)
             
@@ -255,7 +261,13 @@ class CharacterTrainer:
         total = 0
         
         with torch.no_grad():
-            for images, labels in tqdm(val_loader, desc="Validation"):
+            for batch in tqdm(val_loader, desc="Validation"):
+                # Handle both cases: with and without metadata
+                if len(batch) == 3:
+                    images, labels, metadata = batch
+                else:
+                    images, labels = batch
+                    
                 images = images.to(self.device)
                 labels = labels.to(self.device)
                 
