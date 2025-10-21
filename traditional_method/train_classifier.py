@@ -14,12 +14,98 @@ import argparse
 import json
 from datetime import datetime
 import warnings
+import multiprocessing as mp
+from functools import partial
+import pickle
 warnings.filterwarnings('ignore')
 
 # Import feature extraction functions
 from local_spatial_feature import apply_all_filters
 from freq_domain_feature import apply_all_transforms
 from texture_feature import apply_all_texture_methods
+
+
+def extract_single_image_features(args):
+    """
+    Extract features from a single image. This function is designed for multiprocessing.
+    
+    Args:
+        args: Tuple of (image_path, feature_extractor_params)
+    
+    Returns:
+        Tuple of (image_path, features) or (image_path, None) if error
+    """
+    image_path, (spatial_params, freq_params, texture_params) = args
+    
+    try:
+        # Load image
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if image is None:
+            return image_path, np.zeros(103, dtype=np.float32)
+        
+        features = []
+        
+        # 1. Local Spatial Features
+        try:
+            spatial_features = apply_all_filters(image, spatial_params)
+            for feature_name, feature_img in spatial_features.items():
+                features.extend([
+                    np.mean(feature_img),
+                    np.std(feature_img),
+                    np.min(feature_img),
+                    np.max(feature_img),
+                    np.median(feature_img)
+                ])
+        except Exception as e:
+            features.extend([0] * (7 * 5))
+        
+        # 2. Frequency Domain Features
+        try:
+            freq_features = apply_all_transforms(image, freq_params)
+            for feature_name, feature_img in freq_features.items():
+                features.extend([
+                    np.mean(feature_img),
+                    np.std(feature_img),
+                    np.min(feature_img),
+                    np.max(feature_img),
+                    np.median(feature_img)
+                ])
+        except Exception as e:
+            features.extend([0] * (6 * 5))
+        
+        # 3. Texture Features
+        try:
+            texture_features = apply_all_texture_methods(image, texture_params)
+            for feature_name, feature_img in texture_features.items():
+                features.extend([
+                    np.mean(feature_img),
+                    np.std(feature_img),
+                    np.min(feature_img),
+                    np.max(feature_img),
+                    np.median(feature_img)
+                ])
+        except Exception as e:
+            features.extend([0] * (6 * 5))
+        
+        # 4. Raw pixel statistics
+        try:
+            features.extend([
+                np.mean(image),
+                np.std(image),
+                np.min(image),
+                np.max(image),
+                np.median(image),
+                np.sum(image > 127),
+                np.sum(image < 64),
+                np.mean(np.diff(image.flatten())),
+            ])
+        except Exception as e:
+            features.extend([0] * 8)
+        
+        return image_path, np.array(features, dtype=np.float32)
+    
+    except Exception as e:
+        return image_path, np.zeros(103, dtype=np.float32)
 
 
 class FeatureExtractor:
@@ -65,6 +151,56 @@ class FeatureExtractor:
             'msmd_scales': [1, 2, 4],
             'msmd_directions': [0, 45, 90, 135]
         }
+    
+    def extract_features_parallel(self, image_paths, n_processes=None, cache_file=None):
+        """
+        Extract features from multiple images in parallel.
+        
+        Args:
+            image_paths: List of image paths
+            n_processes: Number of processes to use (default: CPU count)
+            cache_file: Optional cache file to save/load features
+        
+        Returns:
+            Dictionary mapping image_path to feature vector
+        """
+        if cache_file and os.path.exists(cache_file):
+            print(f"Loading cached features from {cache_file}...")
+            with open(cache_file, 'rb') as f:
+                return pickle.load(f)
+        
+        if n_processes is None:
+            n_processes = min(mp.cpu_count(), len(image_paths))
+        
+        print(f"Extracting features from {len(image_paths)} images using {n_processes} processes...")
+        
+        # Prepare arguments for parallel processing
+        params = (self.spatial_params, self.freq_params, self.texture_params)
+        args_list = [(img_path, params) for img_path in image_paths]
+        
+        # Use multiprocessing to extract features
+        feature_dict = {}
+        
+        with mp.Pool(n_processes) as pool:
+            # Use imap for progress tracking
+            results = list(tqdm(
+                pool.imap(extract_single_image_features, args_list),
+                total=len(args_list),
+                desc="Extracting features"
+            ))
+        
+        # Convert results to dictionary
+        for img_path, features in results:
+            feature_dict[img_path] = features
+        
+        # Save cache if requested
+        if cache_file:
+            print(f"Saving features to cache file: {cache_file}")
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            with open(cache_file, 'wb') as f:
+                pickle.dump(feature_dict, f)
+        
+        return feature_dict
     
     def extract_features(self, image):
         """
@@ -150,7 +286,8 @@ class CharacterDataset(Dataset):
     Dataset class for character images with feature extraction.
     """
     
-    def __init__(self, image_paths, labels, feature_extractor, transform_features=True):
+    def __init__(self, image_paths, labels, feature_extractor, transform_features=True, 
+                 n_processes=None, cache_file=None):
         self.image_paths = image_paths
         self.labels = labels
         self.feature_extractor = feature_extractor
@@ -161,17 +298,17 @@ class CharacterDataset(Dataset):
         
         # Pre-extract features if specified
         if self.transform_features:
-            print("Pre-extracting features...")
-            self.features = []
-            for img_path in tqdm(self.image_paths):
-                image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-                if image is None:
-                    # Create zero features for failed images
-                    features = np.zeros(103, dtype=np.float32)  # Expected feature size
-                else:
-                    features = self.feature_extractor.extract_features(image)
-                self.features.append(features)
-            self.features = np.array(self.features)
+            if cache_file is None:
+                # Generate cache filename based on dataset size and parameters
+                cache_file = f"features_cache_{len(image_paths)}_images.pkl"
+            
+            feature_dict = self.feature_extractor.extract_features_parallel(
+                self.image_paths, n_processes=n_processes, cache_file=cache_file
+            )
+            
+            # Convert to array in the same order as image_paths
+            self.features = np.array([feature_dict[img_path] for img_path in self.image_paths])
+            print(f"Features extracted: {self.features.shape}")
     
     def _create_label_mapping(self):
         """Create mapping from label strings to indices."""
@@ -478,6 +615,12 @@ def main():
     parser.add_argument('--dropout_rate', type=float, default=0.3, help='Dropout rate (default: 0.3)')
     parser.add_argument('--val_size', type=float, default=0.2, help='Validation set size (default: 0.2)')
     parser.add_argument('--random_state', type=int, default=42, help='Random state for reproducibility (default: 42)')
+    parser.add_argument('--n_processes', type=int, default=None, 
+                       help='Number of processes for feature extraction (default: CPU count)')
+    parser.add_argument('--cache_dir', type=str, default='feature_cache',
+                       help='Directory to store feature cache files (default: feature_cache)')
+    parser.add_argument('--no_cache', action='store_true',
+                       help='Disable feature caching')
     
     args = parser.parse_args()
     
@@ -487,6 +630,12 @@ def main():
     if device.type == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name()}")
         print(f"Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+    
+    # Print multiprocessing info
+    available_cpus = mp.cpu_count()
+    n_processes = args.n_processes if args.n_processes is not None else available_cpus
+    print(f"Available CPUs: {available_cpus}")
+    print(f"Using {n_processes} processes for feature extraction")
     
     # Load data
     image_paths, labels = load_data(args.input_folder)
@@ -504,10 +653,25 @@ def main():
     # Create feature extractor
     feature_extractor = FeatureExtractor()
     
+    # Setup cache files
+    if not args.no_cache:
+        os.makedirs(args.cache_dir, exist_ok=True)
+        train_cache = os.path.join(args.cache_dir, f"train_features_{len(X_train)}.pkl")
+        val_cache = os.path.join(args.cache_dir, f"val_features_{len(X_val)}.pkl")
+    else:
+        train_cache = None
+        val_cache = None
+    
     # Create datasets
     print("\nCreating datasets...")
-    train_dataset = CharacterDataset(X_train, y_train, feature_extractor)
-    val_dataset = CharacterDataset(X_val, y_val, feature_extractor)
+    train_dataset = CharacterDataset(
+        X_train, y_train, feature_extractor, 
+        n_processes=n_processes, cache_file=train_cache
+    )
+    val_dataset = CharacterDataset(
+        X_val, y_val, feature_extractor, 
+        n_processes=n_processes, cache_file=val_cache
+    )
     
     # Get feature size from first sample
     sample_features, _ = train_dataset[0]
@@ -555,6 +719,7 @@ def main():
         'dropout_rate': args.dropout_rate,
         'val_size': args.val_size,
         'random_state': args.random_state,
+        'n_processes': n_processes,
         'input_size': input_size,
         'num_classes': num_classes,
         'label_names': label_names,
@@ -568,6 +733,8 @@ def main():
     print(f"\nTraining complete!")
     print(f"Best model saved as 'best_model.pth'")
     print(f"Configuration saved as 'training_config.json'")
+    if not args.no_cache:
+        print(f"Feature cache saved in '{args.cache_dir}' directory")
     print(f"Use a separate script to evaluate the model on your test set.")
 
 
