@@ -476,8 +476,7 @@ def main():
     parser.add_argument('--hidden_sizes', type=int, nargs='+', default=[512, 256, 128],
                        help='Hidden layer sizes (default: [512, 256, 128])')
     parser.add_argument('--dropout_rate', type=float, default=0.3, help='Dropout rate (default: 0.3)')
-    parser.add_argument('--test_size', type=float, default=0.2, help='Test set size (default: 0.2)')
-    parser.add_argument('--val_size', type=float, default=0.1, help='Validation set size (default: 0.1)')
+    parser.add_argument('--val_size', type=float, default=0.2, help='Validation set size (default: 0.2)')
     parser.add_argument('--random_state', type=int, default=42, help='Random state for reproducibility (default: 42)')
     
     args = parser.parse_args()
@@ -492,22 +491,15 @@ def main():
     # Load data
     image_paths, labels = load_data(args.input_folder)
     
-    # Split data
-    print("\nSplitting data...")
-    X_temp, X_test, y_temp, y_test = train_test_split(
-        image_paths, labels, test_size=args.test_size, 
-        random_state=args.random_state, stratify=labels
-    )
-    
-    val_size_adjusted = args.val_size / (1 - args.test_size)
+    # Split data into train and validation sets only
+    print("\nSplitting data into train and validation sets...")
     X_train, X_val, y_train, y_val = train_test_split(
-        X_temp, y_temp, test_size=val_size_adjusted,
-        random_state=args.random_state, stratify=y_temp
+        image_paths, labels, test_size=args.val_size,
+        random_state=args.random_state, stratify=labels
     )
     
     print(f"Training set: {len(X_train)} images")
     print(f"Validation set: {len(X_val)} images")
-    print(f"Test set: {len(X_test)} images")
     
     # Create feature extractor
     feature_extractor = FeatureExtractor()
@@ -516,7 +508,6 @@ def main():
     print("\nCreating datasets...")
     train_dataset = CharacterDataset(X_train, y_train, feature_extractor)
     val_dataset = CharacterDataset(X_val, y_val, feature_extractor)
-    test_dataset = CharacterDataset(X_test, y_test, feature_extractor)
     
     # Get feature size from first sample
     sample_features, _ = train_dataset[0]
@@ -526,7 +517,6 @@ def main():
     # Create data loaders
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     
     # Create model
     num_classes = len(train_dataset.label_to_idx)
@@ -549,9 +539,8 @@ def main():
     # Load best model
     model.load_state_dict(torch.load('best_model.pth'))
     
-    # Evaluate on test set
+    # Get label names for future use
     label_names = sorted(list(train_dataset.label_to_idx.keys()))
-    test_accuracy = evaluate_model(model, test_loader, device, label_names)
     
     # Plot training history
     plot_training_history(history)
@@ -564,12 +553,10 @@ def main():
         'learning_rate': args.learning_rate,
         'hidden_sizes': args.hidden_sizes,
         'dropout_rate': args.dropout_rate,
-        'test_size': args.test_size,
         'val_size': args.val_size,
         'random_state': args.random_state,
         'input_size': input_size,
         'num_classes': num_classes,
-        'test_accuracy': test_accuracy,
         'label_names': label_names,
         'device': str(device),
         'timestamp': datetime.now().isoformat()
@@ -581,7 +568,7 @@ def main():
     print(f"\nTraining complete!")
     print(f"Best model saved as 'best_model.pth'")
     print(f"Configuration saved as 'training_config.json'")
-    print(f"Final test accuracy: {test_accuracy:.2f}%")
+    print(f"Use a separate script to evaluate the model on your test set.")
 
 
 if __name__ == "__main__":
