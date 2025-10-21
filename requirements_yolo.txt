@@ -1,6 +1,12 @@
 ultralytics
 opencv-python
 numpy
+scipy
+scikit-image
+Pillow
 scikit-learn
 matplotlib
 torch
+torchvision
+tqdm
+seaborn
