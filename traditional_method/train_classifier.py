@@ -35,7 +35,7 @@ def extract_single_image_features(args):
     Returns:
         Tuple of (image_path, features) or (image_path, None) if error
     """
-    image_path, (spatial_params, freq_params, texture_params) = args
+    image_path, (spatial_params, freq_params, texture_params, use_spatial, use_freq, use_texture) = args
     
     try:
         # Load image
@@ -46,46 +46,49 @@ def extract_single_image_features(args):
         features = []
         
         # 1. Local Spatial Features
-        try:
-            spatial_features = apply_all_filters(image, spatial_params)
-            for feature_name, feature_img in spatial_features.items():
-                features.extend([
-                    np.mean(feature_img),
-                    np.std(feature_img),
-                    np.min(feature_img),
-                    np.max(feature_img),
-                    np.median(feature_img)
-                ])
-        except Exception as e:
-            features.extend([0] * (7 * 5))
+        if use_spatial:
+            try:
+                spatial_features = apply_all_filters(image, spatial_params)
+                for feature_name, feature_img in spatial_features.items():
+                    features.extend([
+                        np.mean(feature_img),
+                        np.std(feature_img),
+                        np.min(feature_img),
+                        np.max(feature_img),
+                        np.median(feature_img)
+                    ])
+            except Exception as e:
+                features.extend([0] * (7 * 5))
         
         # 2. Frequency Domain Features
-        try:
-            freq_features = apply_all_transforms(image, freq_params)
-            for feature_name, feature_img in freq_features.items():
-                features.extend([
-                    np.mean(feature_img),
-                    np.std(feature_img),
-                    np.min(feature_img),
-                    np.max(feature_img),
-                    np.median(feature_img)
-                ])
-        except Exception as e:
-            features.extend([0] * (6 * 5))
+        if use_freq:
+            try:
+                freq_features = apply_all_transforms(image, freq_params)
+                for feature_name, feature_img in freq_features.items():
+                    features.extend([
+                        np.mean(feature_img),
+                        np.std(feature_img),
+                        np.min(feature_img),
+                        np.max(feature_img),
+                        np.median(feature_img)
+                    ])
+            except Exception as e:
+                features.extend([0] * (6 * 5))
         
         # 3. Texture Features
-        try:
-            texture_features = apply_all_texture_methods(image, texture_params)
-            for feature_name, feature_img in texture_features.items():
-                features.extend([
-                    np.mean(feature_img),
-                    np.std(feature_img),
-                    np.min(feature_img),
-                    np.max(feature_img),
-                    np.median(feature_img)
-                ])
-        except Exception as e:
-            features.extend([0] * (6 * 5))
+        if use_texture:
+            try:
+                texture_features = apply_all_texture_methods(image, texture_params)
+                for feature_name, feature_img in texture_features.items():
+                    features.extend([
+                        np.mean(feature_img),
+                        np.std(feature_img),
+                        np.min(feature_img),
+                        np.max(feature_img),
+                        np.median(feature_img)
+                    ])
+            except Exception as e:
+                features.extend([0] * (6 * 5))
         
         # 4. Raw pixel statistics
         try:
@@ -105,7 +108,15 @@ def extract_single_image_features(args):
         return image_path, np.array(features, dtype=np.float32)
     
     except Exception as e:
-        return image_path, np.zeros(103, dtype=np.float32)
+        # Calculate expected feature size based on enabled features
+        feature_size = 8  # Raw pixel statistics
+        if use_spatial:
+            feature_size += 7 * 5
+        if use_freq:
+            feature_size += 6 * 5
+        if use_texture:
+            feature_size += 6 * 5
+        return image_path, np.zeros(feature_size, dtype=np.float32)
 
 
 class FeatureExtractor:
@@ -113,7 +124,12 @@ class FeatureExtractor:
     Combined feature extractor using local spatial, frequency domain, and texture features.
     """
     
-    def __init__(self):
+    def __init__(self, use_spatial=True, use_freq=True, use_texture=True):
+        # Feature flags
+        self.use_spatial = use_spatial
+        self.use_freq = use_freq
+        self.use_texture = use_texture
+        
         # Default parameters for feature extraction
         self.spatial_params = {
             'low_pass_cutoff': 30.0,
@@ -173,9 +189,11 @@ class FeatureExtractor:
             n_processes = min(mp.cpu_count(), len(image_paths))
         
         print(f"Extracting features from {len(image_paths)} images using {n_processes} processes...")
+        print(f"Feature extraction enabled: Spatial={self.use_spatial}, Frequency={self.use_freq}, Texture={self.use_texture}")
         
         # Prepare arguments for parallel processing
-        params = (self.spatial_params, self.freq_params, self.texture_params)
+        params = (self.spatial_params, self.freq_params, self.texture_params, 
+                 self.use_spatial, self.use_freq, self.use_texture)
         args_list = [(img_path, params) for img_path in image_paths]
         
         # Use multiprocessing to extract features
@@ -214,53 +232,56 @@ class FeatureExtractor:
         """
         features = []
         
-        try:
-            # 1. Local Spatial Features
-            spatial_features = apply_all_filters(image, self.spatial_params)
-            for feature_name, feature_img in spatial_features.items():
-                # Extract statistical features from each filtered image
-                features.extend([
-                    np.mean(feature_img),
-                    np.std(feature_img),
-                    np.min(feature_img),
-                    np.max(feature_img),
-                    np.median(feature_img)
-                ])
-        except Exception as e:
-            print(f"Error extracting spatial features: {e}")
-            features.extend([0] * (7 * 5))  # 7 filters * 5 statistics each
+        if self.use_spatial:
+            try:
+                # 1. Local Spatial Features
+                spatial_features = apply_all_filters(image, self.spatial_params)
+                for feature_name, feature_img in spatial_features.items():
+                    # Extract statistical features from each filtered image
+                    features.extend([
+                        np.mean(feature_img),
+                        np.std(feature_img),
+                        np.min(feature_img),
+                        np.max(feature_img),
+                        np.median(feature_img)
+                    ])
+            except Exception as e:
+                print(f"Error extracting spatial features: {e}")
+                features.extend([0] * (7 * 5))  # 7 filters * 5 statistics each
         
-        try:
-            # 2. Frequency Domain Features
-            freq_features = apply_all_transforms(image, self.freq_params)
-            for feature_name, feature_img in freq_features.items():
-                # Extract statistical features from each transformed image
-                features.extend([
-                    np.mean(feature_img),
-                    np.std(feature_img),
-                    np.min(feature_img),
-                    np.max(feature_img),
-                    np.median(feature_img)
-                ])
-        except Exception as e:
-            print(f"Error extracting frequency features: {e}")
-            features.extend([0] * (6 * 5))  # 6 transforms * 5 statistics each
+        if self.use_freq:
+            try:
+                # 2. Frequency Domain Features
+                freq_features = apply_all_transforms(image, self.freq_params)
+                for feature_name, feature_img in freq_features.items():
+                    # Extract statistical features from each transformed image
+                    features.extend([
+                        np.mean(feature_img),
+                        np.std(feature_img),
+                        np.min(feature_img),
+                        np.max(feature_img),
+                        np.median(feature_img)
+                    ])
+            except Exception as e:
+                print(f"Error extracting frequency features: {e}")
+                features.extend([0] * (6 * 5))  # 6 transforms * 5 statistics each
         
-        try:
-            # 3. Texture Features
-            texture_features = apply_all_texture_methods(image, self.texture_params)
-            for feature_name, feature_img in texture_features.items():
-                # Extract statistical features from each texture analysis
-                features.extend([
-                    np.mean(feature_img),
-                    np.std(feature_img),
-                    np.min(feature_img),
-                    np.max(feature_img),
-                    np.median(feature_img)
-                ])
-        except Exception as e:
-            print(f"Error extracting texture features: {e}")
-            features.extend([0] * (6 * 5))  # 6 texture methods * 5 statistics each
+        if self.use_texture:
+            try:
+                # 3. Texture Features
+                texture_features = apply_all_texture_methods(image, self.texture_params)
+                for feature_name, feature_img in texture_features.items():
+                    # Extract statistical features from each texture analysis
+                    features.extend([
+                        np.mean(feature_img),
+                        np.std(feature_img),
+                        np.min(feature_img),
+                        np.max(feature_img),
+                        np.median(feature_img)
+                    ])
+            except Exception as e:
+                print(f"Error extracting texture features: {e}")
+                features.extend([0] * (6 * 5))  # 6 texture methods * 5 statistics each
         
         # 4. Add raw pixel statistics as baseline
         try:
@@ -324,7 +345,15 @@ class CharacterDataset(Dataset):
         else:
             image = cv2.imread(self.image_paths[idx], cv2.IMREAD_GRAYSCALE)
             if image is None:
-                features = np.zeros(103, dtype=np.float32)
+                # Calculate expected feature size based on enabled features
+                feature_size = 8  # Raw pixel statistics
+                if self.feature_extractor.use_spatial:
+                    feature_size += 7 * 5
+                if self.feature_extractor.use_freq:
+                    feature_size += 6 * 5
+                if self.feature_extractor.use_texture:
+                    feature_size += 6 * 5
+                features = np.zeros(feature_size, dtype=np.float32)
             else:
                 features = self.feature_extractor.extract_features(image)
         
@@ -621,8 +650,26 @@ def main():
                        help='Directory to store feature cache files (default: feature_cache)')
     parser.add_argument('--no_cache', action='store_true',
                        help='Disable feature caching')
+    parser.add_argument('--use_spatial', action='store_true', default=False,
+                       help='Use local spatial features (default: False, use --use_spatial to enable)')
+    parser.add_argument('--use_freq', action='store_true', default=False,
+                       help='Use frequency domain features (default: False, use --use_freq to enable)')
+    parser.add_argument('--use_texture', action='store_true', default=False,
+                       help='Use texture features (default: False, use --use_texture to enable)')
     
     args = parser.parse_args()
+    
+    # If no feature flags are set, enable all features by default
+    if not (args.use_spatial or args.use_freq or args.use_texture):
+        print("No feature flags specified. Enabling all features by default.")
+        args.use_spatial = True
+        args.use_freq = True
+        args.use_texture = True
+    
+    print(f"Feature extraction configuration:")
+    print(f"  - Spatial features: {args.use_spatial}")
+    print(f"  - Frequency domain features: {args.use_freq}")
+    print(f"  - Texture features: {args.use_texture}")
     
     # Check CUDA availability
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -651,13 +698,28 @@ def main():
     print(f"Validation set: {len(X_val)} images")
     
     # Create feature extractor
-    feature_extractor = FeatureExtractor()
+    feature_extractor = FeatureExtractor(
+        use_spatial=args.use_spatial,
+        use_freq=args.use_freq,
+        use_texture=args.use_texture
+    )
     
     # Setup cache files
     if not args.no_cache:
         os.makedirs(args.cache_dir, exist_ok=True)
-        train_cache = os.path.join(args.cache_dir, f"train_features_{len(X_train)}.pkl")
-        val_cache = os.path.join(args.cache_dir, f"val_features_{len(X_val)}.pkl")
+        # Extract dataset name from input folder path
+        dataset_name = os.path.basename(os.path.normpath(args.input_folder))
+        # Create feature type suffix
+        feature_suffix = ""
+        if args.use_spatial:
+            feature_suffix += "_spatial"
+        if args.use_freq:
+            feature_suffix += "_freq"
+        if args.use_texture:
+            feature_suffix += "_texture"
+        
+        train_cache = os.path.join(args.cache_dir, f"{dataset_name}_train_{len(X_train)}{feature_suffix}.pkl")
+        val_cache = os.path.join(args.cache_dir, f"{dataset_name}_val_{len(X_val)}{feature_suffix}.pkl")
     else:
         train_cache = None
         val_cache = None
@@ -724,6 +786,9 @@ def main():
         'num_classes': num_classes,
         'label_names': label_names,
         'device': str(device),
+        'use_spatial': args.use_spatial,
+        'use_freq': args.use_freq,
+        'use_texture': args.use_texture,
         'timestamp': datetime.now().isoformat()
     }
     
