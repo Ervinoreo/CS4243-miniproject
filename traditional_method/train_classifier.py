@@ -415,8 +415,8 @@ def train_model(model, train_loader, val_loader, device, num_epochs=100, learnin
         Training history
     """
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=10, factor=0.5)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-3)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=20, factor=0.5)
     
     history = {
         'train_loss': [],
@@ -427,7 +427,7 @@ def train_model(model, train_loader, val_loader, device, num_epochs=100, learnin
     
     best_val_acc = 0.0
     patience_counter = 0
-    early_stopping_patience = 20
+    early_stopping_patience = 100
     
     print(f"Starting training on {device}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
