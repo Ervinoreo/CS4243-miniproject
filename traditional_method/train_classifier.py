@@ -457,7 +457,21 @@ def train_model(model, train_loader, val_loader, device, num_epochs=100, learnin
     best_val_acc = 0.0
     patience_counter = 0
     early_stopping_patience = 100
-    
+
+    # Determine feature suffix for model filename
+    from datetime import datetime
+    feature_suffix = ""
+    if hasattr(model, 'feature_flags'):
+        if model.feature_flags.get('use_spatial', False):
+            feature_suffix += "_spatial"
+        if model.feature_flags.get('use_freq', False):
+            feature_suffix += "_freq"
+        if model.feature_flags.get('use_texture', False):
+            feature_suffix += "_texture"
+    else:
+        feature_suffix = ""
+    date_str = datetime.now().strftime("_%Y%m%d")
+
     print(f"Starting training on {device}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
@@ -536,9 +550,10 @@ def train_model(model, train_loader, val_loader, device, num_epochs=100, learnin
         # Early stopping and best model saving
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            torch.save(model.state_dict(), 'best_model.pth')
+            model_filename = f'best_model{feature_suffix}{date_str}.pth'
+            torch.save(model.state_dict(), model_filename)
             patience_counter = 0
-            print(f'  New best validation accuracy: {best_val_acc:.2f}% - Model saved!')
+            print(f'  New best validation accuracy: {best_val_acc:.2f}% - Model saved as {model_filename}!')
         else:
             patience_counter += 1
         
@@ -752,18 +767,34 @@ def main():
         num_classes=num_classes,
         dropout_rate=args.dropout_rate
     ).to(device)
-    
+    # Attach feature flags for model filename
+    model.feature_flags = {
+        'use_spatial': args.use_spatial,
+        'use_freq': args.use_freq,
+        'use_texture': args.use_texture
+    }
+
     print(f"\nModel created with {num_classes} classes")
     print(f"Model architecture: {input_size} -> {' -> '.join(map(str, args.hidden_sizes))} -> {num_classes}")
-    
+
     # Train model
     history = train_model(
         model, train_loader, val_loader, device,
         num_epochs=args.epochs, learning_rate=args.learning_rate
     )
-    
-    # Load best model
-    model.load_state_dict(torch.load('best_model.pth'))
+
+    # Load best model with correct feature suffix and date
+    from datetime import datetime
+    feature_suffix = ""
+    if args.use_spatial:
+        feature_suffix += "_spatial"
+    if args.use_freq:
+        feature_suffix += "_freq"
+    if args.use_texture:
+        feature_suffix += "_texture"
+    date_str = datetime.now().strftime("_%Y%m%d")
+    model_filename = f'best_model{feature_suffix}{date_str}.pth'
+    model.load_state_dict(torch.load(model_filename))
     
     # Get label names for future use
     label_names = sorted(list(train_dataset.label_to_idx.keys()))
@@ -796,7 +827,7 @@ def main():
         json.dump(config, f, indent=2)
     
     print(f"\nTraining complete!")
-    print(f"Best model saved as 'best_model.pth'")
+    print(f"Best model saved as '{model_filename}'")
     print(f"Configuration saved as 'training_config.json'")
     if not args.no_cache:
         print(f"Feature cache saved in '{args.cache_dir}' directory")
