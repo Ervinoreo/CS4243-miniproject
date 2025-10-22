@@ -733,8 +733,8 @@ def main():
         if args.use_texture:
             feature_suffix += "_texture"
         
-        train_cache = os.path.join(args.cache_dir, f"{dataset_name}_train_{len(X_train)}{feature_suffix}.pkl")
-        val_cache = os.path.join(args.cache_dir, f"{dataset_name}_val_{len(X_val)}{feature_suffix}.pkl")
+        train_cache = os.path.join(args.cache_dir, f"train_features_{len(X_train)}.pkl")
+        val_cache = os.path.join(args.cache_dir, f"val_features_{len(X_val)}.pkl")
     else:
         train_cache = None
         val_cache = None
