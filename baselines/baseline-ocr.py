@@ -205,12 +205,22 @@ class TrOCRCaptchaModel:
             labels_ids = pred.label_ids
             pred_ids = pred.predictions
 
-            pred_str = self.processor.batch_decode(pred_ids, skip_special_tokens=True)
-            labels_ids[labels_ids == -100] = self.processor.tokenizer.pad_token_id
-            label_str = self.processor.batch_decode(labels_ids, skip_special_tokens=True)
+            # Handle potential overflow errors and invalid token IDs
+            try:
+                # Clip prediction IDs to valid range
+                vocab_size = self.processor.tokenizer.vocab_size
+                pred_ids = np.clip(pred_ids, 0, vocab_size - 1)
+                
+                pred_str = self.processor.batch_decode(pred_ids, skip_special_tokens=True)
+                labels_ids[labels_ids == -100] = self.processor.tokenizer.pad_token_id
+                label_str = self.processor.batch_decode(labels_ids, skip_special_tokens=True)
 
-            cer = cer_metric.compute(predictions=pred_str, references=label_str)
-            return {"cer": cer}
+                cer = cer_metric.compute(predictions=pred_str, references=label_str)
+                return {"cer": cer}
+            except (OverflowError, ValueError) as e:
+                print(f"Warning: Error in compute_metrics: {e}")
+                # Return a high CER as fallback
+                return {"cer": 1.0}
         
         # Training arguments
         training_args = Seq2SeqTrainingArguments(
