@@ -215,7 +215,7 @@ class TrOCRCaptchaModel:
         # Training arguments
         training_args = Seq2SeqTrainingArguments(
             predict_with_generate=True,
-            evaluation_strategy="steps",
+            eval_strategy="steps",
             per_device_train_batch_size=8,  # Reduced for memory
             per_device_eval_batch_size=8,
             fp16=True if torch.cuda.is_available() else False,
