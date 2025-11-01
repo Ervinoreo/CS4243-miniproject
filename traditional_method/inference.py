@@ -21,9 +21,10 @@ class CharacterClassifier:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
 
-        use_spatial = '_spatial' in model_path
-        use_freq    = '_freq' in model_path
-        use_texture = '_texture' in model_path
+        use_spatial = self.config.get("use_spatial", True)
+        use_freq    = self.config.get("use_freq", True)
+        use_texture = self.config.get("use_texture", True)
+
 
         # Initialize FeatureExtractor with the correct combination
         self.feature_extractor = FeatureExtractor(
