@@ -121,23 +121,6 @@ def klt_transform(image, n_components=10):
     
     return result.astype(np.uint8)
 
-# Wavelet Transform
-def wavelet_transform(image, wavelet='haar', level=2):
-    try:
-        import pywt
-        coeffs = pywt.wavedec2(image, wavelet, level=level)
-        arr, _ = pywt.coeffs_to_array(coeffs)
-        arr = np.abs(arr)
-        arr = 255 * arr / arr.max()
-        return arr.astype(np.uint8)
-    except ImportError:
-        # Fallback: use simple DCT if pywt is not available
-        from scipy.fftpack import dct
-        dct_result = dct(dct(image.T, norm='ortho').T, norm='ortho')
-        dct_result = np.abs(dct_result)
-        dct_result = 255 * dct_result / dct_result.max()
-        return dct_result.astype(np.uint8)
-
 # Gabor Filters
 def gabor_filter(image, frequency=0.6, theta=0):
     try:
@@ -198,11 +181,6 @@ def apply_all_transforms(image, params):
 		print(f"Error KLT: {e}")
 		transforms['KLT'] = image
 	try:
-		transforms['Wavelet'] = wavelet_transform(image, params['wavelet_type'], params['wavelet_level'])
-	except Exception as e:
-		print(f"Error Wavelet: {e}")
-		transforms['Wavelet'] = image
-	try:
 		transforms['Gabor'] = gabor_filter(image, params['gabor_frequency'], params['gabor_theta'])
 	except Exception as e:
 		print(f"Error Gabor: {e}")
@@ -216,9 +194,9 @@ def apply_all_transforms(image, params):
 
 def create_combined_visualization(original_image, transformed_images, output_path, image_name):
 	n_images = len(transformed_images) + 1
-	cols = 4
+	cols = 3
 	rows = (n_images + cols - 1) // cols
-	fig = plt.figure(figsize=(16, 4 * rows))
+	fig = plt.figure(figsize=(16, 3 * rows))
 	gs = GridSpec(rows, cols, figure=fig)
 	ax1 = fig.add_subplot(gs[0, 0])
 	ax1.imshow(original_image, cmap='gray')
@@ -322,8 +300,6 @@ def main():
 	parser.add_argument('input_folder', help='Input folder containing subfolders with PNG images')
 	parser.add_argument('--num_processes', type=int, default=None, help='Number of parallel processes to use (default: CPU count)')
 	parser.add_argument('--klt_components', type=int, default=10, help='Number of KLT components (default: 10)')
-	parser.add_argument('--wavelet_type', type=str, default='haar', help='Wavelet type (default: haar)')
-	parser.add_argument('--wavelet_level', type=int, default=2, help='Wavelet decomposition level (default: 2)')
 	parser.add_argument('--gabor_frequency', type=float, default=0.6, help='Gabor filter frequency (default: 0.6)')
 	parser.add_argument('--gabor_theta', type=float, default=0.0, help='Gabor filter orientation theta in radians (default: 0.0)')
 	args = parser.parse_args()
@@ -333,13 +309,9 @@ def main():
 	if args.klt_components < 1:
 		print("Error: KLT components must be >= 1.")
 		return
-	if args.wavelet_level < 1:
-		print("Error: Wavelet level must be >= 1.")
-		return
+
 	params = {
 		'klt_components': args.klt_components,
-		'wavelet_type': args.wavelet_type,
-		'wavelet_level': args.wavelet_level,
 		'gabor_frequency': args.gabor_frequency,
 		'gabor_theta': args.gabor_theta
 	}
