@@ -99,13 +99,41 @@ if __name__ == "__main__":
 
             img_features = {"filename": fname}
             transformed_all = []
+            
+            # collect individual subband images for detailed visualization
+            all_subband_images = []
+            all_subband_titles = []
 
             # process each wavelet
             for w in wavelets:
                 feats, subband_imgs = wavelet_features(img, w, levels=max_level)
                 img_features.update(feats)
 
-                # stack all level images vertically for visualization
+                # collect individual subbands for this wavelet
+                wavelet_subbands = []
+                wavelet_titles = []
+                
+                # Get individual subbands from the coefficients
+                coeffs = pywt.wavedec2(img, w, level=max_level)
+                for lvl, coeff in enumerate(coeffs):
+                    if lvl == 0:
+                        # LL subband (approximation)
+                        LL = coeff
+                        LL_norm = np.uint8(255 * (LL - LL.min()) / (np.ptp(LL) + 1e-8))
+                        wavelet_subbands.append(LL_norm)
+                        wavelet_titles.append(f"{w} L{lvl} LL")
+                    else:
+                        # Detail subbands
+                        LH, HL, HH = coeff
+                        for name, band in [("LH", LH), ("HL", HL), ("HH", HH)]:
+                            band_norm = np.uint8(255 * (band - band.min()) / (np.ptp(band) + 1e-8))
+                            wavelet_subbands.append(band_norm)
+                            wavelet_titles.append(f"{w} L{lvl} {name}")
+                
+                all_subband_images.append(wavelet_subbands)
+                all_subband_titles.append(wavelet_titles)
+
+                # stack all level images vertically for visualization (for non-labeled output)
                 vis_bands = []
                 for sb in subband_imgs:
                     sb_norm = np.uint8(255 * (sb - sb.min()) / (np.ptp(sb) + 1e-8))
@@ -125,18 +153,48 @@ if __name__ == "__main__":
 
             # labeled visualization for first few images
             if img_count < 5:
-                fig, axes = plt.subplots(1, len(wavelets) + 1, figsize=(16, 4))
+                # Calculate grid dimensions
+                max_cols = 5
+                
+                # Prepare all images to display
+                display_images = []
+                display_titles = []
+                
+                # First row: original image (centered)
+                display_images.append([img])
+                display_titles.append(["Original"])
+                
+                # Add wavelet subbands row by row
+                for wavelet_idx, (subbands, titles) in enumerate(zip(all_subband_images, all_subband_titles)):
+                    # Split subbands into rows of max 8 columns
+                    for i in range(0, len(subbands), max_cols):
+                        row_images = subbands[i:i+max_cols]
+                        row_titles = titles[i:i+max_cols]
+                        display_images.append(row_images)
+                        display_titles.append(row_titles)
+                
+                # Calculate total rows and max columns needed
+                total_rows = len(display_images)
+                max_cols_actual = max(len(row) for row in display_images)
+                
+                fig, axes = plt.subplots(total_rows, max_cols_actual, figsize=(2*max_cols_actual, 2*total_rows))
                 fig.suptitle(f"Wavelet Multi-level Results - {fname}", fontsize=14, fontweight="bold")
-                axes[0].imshow(img, cmap="gray")
-                axes[0].set_title("Original", fontsize=10)
-                axes[0].axis("off")
-
-                for i, (ax, w) in enumerate(zip(axes[1:], wavelets)):
-                    ax.imshow(transformed_all[i], cmap="gray")
-                    ax.set_title(w, fontsize=10)
-                    ax.axis("off")
-
-                plt.subplots_adjust(wspace=0.05, hspace=0.2)
+                
+                # Handle single row case
+                if total_rows == 1:
+                    axes = [axes]
+                if max_cols_actual == 1:
+                    axes = [[ax] for ax in axes]
+                
+                # Display images
+                for row_idx, (row_images, row_titles) in enumerate(zip(display_images, display_titles)):
+                    for col_idx in range(max_cols_actual):
+                        if col_idx < len(row_images):
+                            axes[row_idx][col_idx].imshow(row_images[col_idx], cmap="gray")
+                            axes[row_idx][col_idx].set_title(row_titles[col_idx], fontsize=8)
+                        axes[row_idx][col_idx].axis("off")
+                
+                plt.tight_layout()
                 labeled_out_path = os.path.join(labeled_dir, f"labeled_{fname}")
                 plt.savefig(labeled_out_path, dpi=150, bbox_inches="tight")
                 plt.close(fig)
