@@ -1,23 +1,36 @@
 import os
+import glob
 import torch
 import cv2
 import numpy as np
 import argparse
 import json
-import glob
+from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from train_classifier import FeatureExtractor, CharacterMLP
 
 class CharacterClassifier:
+    """
+    Character classifier for inference.
+    """
     def __init__(self, model_path, config_path):
         with open(config_path, 'r') as f:
             self.config = json.load(f)
         
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
-        
-        self.feature_extractor = FeatureExtractor()
-        
+
+        use_spatial = '_spatial' in model_path
+        use_freq    = '_freq' in model_path
+        use_texture = '_texture' in model_path
+
+        # Initialize FeatureExtractor with the correct combination
+        self.feature_extractor = FeatureExtractor(
+            use_spatial=use_spatial,
+            use_freq=use_freq,
+            use_texture=use_texture
+        )
+                        
         self.model = CharacterMLP(
             input_size=self.config['input_size'],
             hidden_sizes=self.config['hidden_sizes'],
@@ -48,78 +61,80 @@ class CharacterClassifier:
         predicted_class = self.label_names[predicted_idx.item()]
         return predicted_class, confidence.item()
     
-    def predict_batch(self, image_paths):
+    def predict_folder(self, folder_path):
+        """
+        Predict all images in subfolders. Subfolder name = true label.
+        Returns: y_true, y_pred lists
+        """
         y_true = []
         y_pred = []
-        for image_path in image_paths:
-            filename = os.path.basename(image_path)
-            pred_class, _ = self.predict_image(image_path)
-            y_pred.append(pred_class)
-            
-            # Try to infer true label from filename
-            true_label = None
-            for label in self.label_names:
-                if label.lower() in filename.lower():
-                    true_label = label
-                    break
-            y_true.append(true_label)
+
+        # Iterate over subfolders
+        for subfolder in os.listdir(folder_path):
+            subfolder_path = os.path.join(folder_path, subfolder)
+            if not os.path.isdir(subfolder_path):
+                continue
+            # Collect images
+            image_files = [os.path.join(subfolder_path, f) 
+                           for f in os.listdir(subfolder_path)
+                           if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
+            for image_path in tqdm(image_files, desc=f"Processing {subfolder}", leave=False):
+                try:
+                    pred_class, _ = self.predict_image(image_path)
+                    y_pred.append(pred_class)
+                    y_true.append(subfolder)
+                except Exception as e:
+                    print(f"Error processing {image_path}: {e}")
         return y_true, y_pred
 
 def main():
     parser = argparse.ArgumentParser(description="Batch inference with metrics")
-    parser.add_argument("--folder", required=True, help="Folder containing model, config, and images")
+    parser.add_argument("--model_folder", required=True,
+                        help="Folder containing best_model_*.pth and training_config.json")
+    parser.add_argument("--test_folder", required=True,
+                        help="Folder containing test images in subfolders (subfolder = label)")
     args = parser.parse_args()
-    folder = args.folder
 
-    # Find model and config
-    model_files = glob.glob(os.path.join(folder, "best_model_*.pth"))
+    model_folder = args.model_folder
+    test_folder = args.test_folder
+
+    # Find latest best_model_*.pth
+    model_files = glob.glob(os.path.join(model_folder, "best_model_*.pth"))
     if not model_files:
-        print("No best_model_*.pth found in folder.")
+        print("No best_model_*.pth found in model folder.")
         return
-    model_path = model_files[0]
+    model_path = max(model_files, key=os.path.getmtime)
+    print(f"Using model: {model_path}")
 
-    config_path = os.path.join(folder, "training_config.json")
+    # Find training_config.json
+    config_path = os.path.join(model_folder, "training_config.json")
     if not os.path.exists(config_path):
-        print("training_config.json not found in folder.")
+        print("training_config.json not found in model folder.")
         return
 
     classifier = CharacterClassifier(model_path, config_path)
 
-    # Find all images
-    image_files = [os.path.join(folder, f) for f in os.listdir(folder)
-                   if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
-    if not image_files:
-        print("No image files found in folder.")
-        return
+    # Predict all images in test folder subfolders
+    y_true, y_pred = classifier.predict_folder(test_folder)
 
-    y_true, y_pred = classifier.predict_batch(image_files)
-
-    # Filter out None true labels
-    filtered_y_true = []
-    filtered_y_pred = []
-    for t, p in zip(y_true, y_pred):
-        if t is not None:
-            filtered_y_true.append(t)
-            filtered_y_pred.append(p)
-
-    if not filtered_y_true:
-        print("No valid ground truth labels could be inferred from filenames.")
+    if not y_true:
+        print("No images found in test folder subdirectories.")
         return
 
     # Compute metrics
-    acc = accuracy_score(filtered_y_true, filtered_y_pred)
-    precision_w, recall_w, f1_w, _ = precision_recall_fscore_support(filtered_y_true, filtered_y_pred, average='weighted')
-    precision_m, recall_m, f1_m, _ = precision_recall_fscore_support(filtered_y_true, filtered_y_pred, average='macro')
+    acc = accuracy_score(y_true, y_pred)
+    precision_w, recall_w, f1_w, _ = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+    precision_m, recall_m, f1_m, _ = precision_recall_fscore_support(y_true, y_pred, average='macro')
 
-    print(f"\nResults on folder: {folder}")
-    print(f"{'-'*40}")
-    print(f"Accuracy: {acc:.4f}")
-    print(f"Precision (Weighted): {precision_w:.4f}")
-    print(f"Recall (Weighted):    {recall_w:.4f}")
-    print(f"F1-score (Weighted):  {f1_w:.4f}")
-    print(f"Precision (Macro):    {precision_m:.4f}")
-    print(f"Recall (Macro):       {recall_m:.4f}")
-    print(f"F1-score (Macro):     {f1_m:.4f}")
+    print(f"\nResults on test folder: {test_folder}")
+    print(f"{'-'*50}")
+    print(f"Accuracy:           {acc:.4f}")
+    print(f"Weighted Precision: {precision_w:.4f}")
+    print(f"Weighted Recall:    {recall_w:.4f}")
+    print(f"Weighted F1-score:  {f1_w:.4f}")
+    print(f"Macro Precision:    {precision_m:.4f}")
+    print(f"Macro Recall:       {recall_m:.4f}")
+    print(f"Macro F1-score:     {f1_m:.4f}")
 
 if __name__ == "__main__":
     main()
