@@ -32,5 +32,4 @@ source ".venv/bin/activate"
 # rm -r __pycache__
 
 # Run the Python preprocessing script with user-specified number of workers
-python preprocess_clean/process_images.py "$INPUT_FOLDER" -o "$OUTPUT_FOLDER" -w 250 -b 5 -k 3 -s 3 -m 40 -t 1.1 -p 3 -c 30 -mul 2.0 --size-ratio-threshold 0.4 --large-box-ratio 2.5 --wide-box-color-threshold 30 --workers "$NUM_WORKERS"
-
+python label_data_par.py "$INPUT_FOLDER" "$OUTPUT_FOLDER" -t "$NUM_WORKERS"

@@ -20,8 +20,8 @@
 #SBATCH --mem=16G                           # 20GB of memory per task
 
 ## Log file names for output and error
-#SBATCH --output=./logs/output_image_seg_%j.slurmlog
-#SBATCH --error=./logs/error_image_seg_%j.slurmlog
+#SBATCH --output=./logs/output_%j.slurmlog
+#SBATCH --error=./logs/error_%j.slurmlog
 
 # Check if script argument is provided
 if [ "$#" -ne 1 ]; then
