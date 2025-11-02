@@ -883,8 +883,8 @@ def main():
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training (default: 64)')
     parser.add_argument('--epochs', type=int, default=1000, help='Number of training epochs (default: 1000)')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate (default: 0.001)')
-    parser.add_argument('--hidden_sizes', type=int, nargs='+', default=[4096, 2048, 1024, 512, 256],
-                       help='Hidden layer sizes (default: [4096, 2048, 1024, 512, 256])')
+    parser.add_argument('--hidden_sizes', type=int, nargs='+', default=[512, 256, 128],
+                       help='Hidden layer sizes (default: [512, 256, 128])')
     parser.add_argument('--dropout_rate', type=float, default=0.3, help='Dropout rate (default: 0.3)')
     parser.add_argument('--val_size', type=float, default=0.2, help='Validation set size (default: 0.2)')
     parser.add_argument('--random_state', type=int, default=42, help='Random state for reproducibility (default: 42)')
