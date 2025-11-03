@@ -24,6 +24,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support, classification_report, accuracy_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 import joblib
 
 from tqdm import tqdm
@@ -153,10 +156,18 @@ class CharacterDataset(Dataset):
         label = self.labels[idx]
         
         if self.transform:
-            # Convert to PIL Image for transforms
-            if len(image.shape) == 2:  # Grayscale
-                image = np.stack([image] * 3, axis=0)  # Convert to 3-channel
+            # If transform is provided we expect the model to be a large pretrained model
+            # Ensure image is in CHW tensor format and apply the transform (e.g., Normalize)
+            if len(image.shape) == 2:  # Grayscale -> replicate channels
+                image = np.stack([image] * 3, axis=0)
+            # image is already CHW for large models from preprocess_image_large
             image = torch.FloatTensor(image)
+            # Apply transform (should be a Compose containing Normalize)
+            try:
+                image = self.transform(image)
+            except Exception:
+                # If transform expects PIL or different input, fall back to using the tensor as-is
+                pass
         else:
             if len(image.shape) == 2:  # Grayscale for CNN
                 image = torch.FloatTensor(image).unsqueeze(0)
@@ -423,8 +434,12 @@ class EnsembleModel:
         self.resnet_trainer = ModelTrainer(self.resnet_model, device, 'resnet50')
         self.vgg_trainer = ModelTrainer(self.vgg_model, device, 'vgg16')
         
-        # Meta-learner (Decision Tree)
-        self.meta_learner = DecisionTreeClassifier(random_state=42, max_depth=10)
+        # Meta-learner: use a regularized linear classifier on concatenated probabilities
+        # Pipeline scales features then runs logistic regression (multinomial)
+        self.meta_learner = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=2000, C=1.0, random_state=42)
+        )
         
         # Transforms for different models
         self.transform_resnet_vgg = transforms.Compose([
@@ -486,13 +501,11 @@ class EnsembleModel:
         vgg_preds, vgg_probs = self.vgg_trainer.predict_with_probabilities(val_loader_large)
         
         # Create feature matrix for meta-learner
-        # Features: predictions + top probabilities from each model
-        meta_features = np.column_stack([
-            cnn_preds, np.max(cnn_probs, axis=1),
-            resnet_preds, np.max(resnet_probs, axis=1),
-            vgg_preds, np.max(vgg_probs, axis=1)
-        ])
-        
+        # Use the full softmax probability vectors from each model concatenated together.
+        # This gives the meta-learner the full distributional information rather than
+        # only the argmax and the max-prob, which improves robustness.
+        meta_features = np.hstack([cnn_probs, resnet_probs, vgg_probs])
+
         # Train meta-learner
         self.meta_learner.fit(meta_features, y_val)
         
@@ -522,13 +535,9 @@ class EnsembleModel:
         resnet_preds, resnet_probs = self.resnet_trainer.predict_with_probabilities(test_loader_large)
         vgg_preds, vgg_probs = self.vgg_trainer.predict_with_probabilities(test_loader_large)
         
-        # Create feature matrix for meta-learner
-        meta_features = np.column_stack([
-            cnn_preds, np.max(cnn_probs, axis=1),
-            resnet_preds, np.max(resnet_probs, axis=1),
-            vgg_preds, np.max(vgg_probs, axis=1)
-        ])
-        
+        # Create feature matrix for meta-learner using concatenated probability vectors
+        meta_features = np.hstack([cnn_probs, resnet_probs, vgg_probs])
+
         # Get ensemble predictions
         ensemble_preds = self.meta_learner.predict(meta_features)
         
