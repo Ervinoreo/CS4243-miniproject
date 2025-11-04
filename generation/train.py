@@ -13,8 +13,8 @@ CHANNELS = 1
 BATCH_SIZE = 128
 LATENT_DIM = 100
 RESUME_TRAINING = True
-START_EPOCH = 300
-TOTAL_EPOCHS = 310
+START_EPOCH = 0
+TOTAL_EPOCHS = 150
 SAVE_EVERY = 10
 
 train_dataset = tf.keras.utils.image_dataset_from_directory(
