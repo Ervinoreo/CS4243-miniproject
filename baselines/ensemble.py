@@ -708,7 +708,7 @@ def main():
     # Configuration
     TRAIN_DIR = "./char_dataset/labeled_train"
     TEST_DIR = "./char_dataset/labeled_test"
-    EPOCHS = 30
+    EPOCHS = 100
     
     # Check for GPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
