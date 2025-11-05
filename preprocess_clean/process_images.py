@@ -173,20 +173,49 @@ def process_single_image(image_path, output_folder, white_threshold=250, black_t
 
             if len(size_filtered_bboxes) == num_expected_segments:
                 print(f"Image {image_path.name}: Found expected number of segments ({num_expected_segments}) after size filtering.")
-                # create the debug image with filtered boxes
+                
+                # Sort bounding boxes by x_min coordinate for consistent labeling
+                size_filtered_bboxes_with_x = [(bbox, bbox[0]) for bbox in size_filtered_bboxes]
+                size_filtered_bboxes_with_x.sort(key=lambda x: x[1])
+                sorted_size_filtered_bboxes = [bbox for bbox, x_min in size_filtered_bboxes_with_x]
+                
+                # Create debug images
+                # 1. Original image (top)
+                debug_original = image.copy()
+                
+                # 2. Smoothed mask with numbered bounding boxes (middle)
+                debug_smoothed_image = cv2.cvtColor(smoothed_mask, cv2.COLOR_GRAY2BGR)
+                for i, valid_bbox in enumerate(sorted_size_filtered_bboxes):
+                    x1, y1, x2, y2 = valid_bbox[:4]
+                    cv2.rectangle(debug_smoothed_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    # Add label number (1-indexed)
+                    label_text = str(i + 1)
+                    label_pos = (x1, y1 - 5 if y1 > 20 else y2 + 20)
+                    cv2.putText(debug_smoothed_image, label_text, label_pos, 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+                
+                # 3. Final image with bounding boxes (bottom)
                 debug_color_image = image.copy()
-                for valid_bbox in size_filtered_bboxes:
+                for i, valid_bbox in enumerate(sorted_size_filtered_bboxes):
                     x1, y1, x2, y2 = valid_bbox[:4]
                     cv2.rectangle(debug_color_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    # Convert original mask to 3-channel for concatenation
-                    mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-                    debug_combined = cv2.hconcat([debug_color_image, mask_3ch])
-                    debug_folder = output_folder / "debug"
-                    debug_folder.mkdir(parents=True, exist_ok=True)
-                    debug_filename = f"{image_path.stem}_size_filtered{image_path.suffix}"
-                    debug_path = debug_folder / debug_filename
-                    cv2.imwrite(debug_path, debug_combined)
-                valid_bboxes = size_filtered_bboxes
+                    # Add label number (1-indexed)
+                    label_text = str(i + 1)
+                    label_pos = (x1, y1 - 5 if y1 > 20 else y2 + 20)
+                    cv2.putText(debug_color_image, label_text, label_pos, 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+                
+                # Stack images vertically
+                debug_combined = np.vstack([debug_original, debug_smoothed_image, debug_color_image])
+                
+                # Save debug image
+                debug_folder = output_folder / "debug"
+                debug_folder.mkdir(parents=True, exist_ok=True)
+                debug_filename = f"{image_path.stem}_size_filtered{image_path.suffix}"
+                debug_path = debug_folder / debug_filename
+                cv2.imwrite(debug_path, debug_combined)
+                
+                valid_bboxes = sorted_size_filtered_bboxes
 
                 # Sort bounding boxes by x_min coordinate (ascending order) 
                 valid_bboxes_with_x = [(bbox, bbox[0]) for bbox in valid_bboxes]
