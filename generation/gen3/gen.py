@@ -170,28 +170,28 @@ class Critic(nn.Module):
         self.conv1 = nn.Sequential(
             nn.Conv2d(4, 32, 4, 2, 1),
             nn.LeakyReLU(0.2),
-            nn.Dropout2d(0.5)  # Increased dropout
+            nn.Dropout2d(0.3)
         )
 
         self.conv2 = nn.Sequential(
             nn.Conv2d(32, 64, 4, 2, 1),
             nn.InstanceNorm2d(64),
             nn.LeakyReLU(0.2),
-            nn.Dropout2d(0.5)
+            nn.Dropout2d(0.3)
         )
 
         self.conv3 = nn.Sequential(
             nn.Conv2d(64, 128, 4, 2, 1),
             nn.InstanceNorm2d(128),
             nn.LeakyReLU(0.2),
-            nn.Dropout2d(0.5)
+            nn.Dropout2d(0.3)
         )
 
         self.conv4 = nn.Sequential(
             nn.Conv2d(128, 256, 4, 2, 1),
             nn.InstanceNorm2d(256),
             nn.LeakyReLU(0.2),
-            nn.Dropout2d(0.5)
+            nn.Dropout2d(0.3)
         )
 
         final_h = img_size[0] // 16
@@ -268,10 +268,10 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0001,
     critic = Critic(label_dim=label_dim, img_size=img_size).to(device)
 
     # Optimizers with better settings for stability
-    optimizer_G = optim.RMSprop(generator.parameters(), lr=0.0002)
-    optimizer_C = optim.RMSprop(critic.parameters(), lr=0.00005)
+    optimizer_G = optim.Adam(generator.parameters(), lr=0.0002, betas=(0.0, 0.9))
+    optimizer_C = optim.Adam(critic.parameters(), lr=0.00005, betas=(0.0, 0.9))
 
-    os.makedirs('generated_samples', exist_ok=True)
+    os.makedirs('generated_samples_1', exist_ok=True)
     os.makedirs('models', exist_ok=True)
 
     # Training loop
@@ -302,6 +302,7 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0001,
             c_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty
 
             c_loss.backward()
+            torch.nn.utils.clip_grad_norm_(critic.parameters(), max_norm=1.0)
             optimizer_C.step()
 
             # =================
@@ -317,6 +318,7 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0001,
                 g_loss = -torch.mean(critic(gen_imgs, labels))
 
                 g_loss.backward()
+                torch.nn.utils.clip_grad_norm_(generator.parameters(), max_norm=1.0)  # ADD THIS
                 optimizer_G.step()
 
             # Print progress
@@ -334,7 +336,7 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0001,
                 gen_imgs = generator(z, sample_labels)
 
                 from torchvision.utils import save_image
-                save_image(gen_imgs, f'generated_samples/epoch_{epoch}.png',
+                save_image(gen_imgs, f'generated_samples_1/epoch_{epoch}.png',
                            nrow=4, normalize=True)
             generator.train()
 
@@ -381,8 +383,8 @@ if __name__ == "__main__":
         batch_size=BATCH_SIZE,
         img_size=IMG_SIZE,
         lr=LR,
-        n_critic=3,
-        lambda_gp=5
+        n_critic=5,
+        lambda_gp=10
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
