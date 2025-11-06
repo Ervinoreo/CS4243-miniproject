@@ -3,5 +3,11 @@ opencv-python
 numpy
 scikit-learn
 matplotlib
+scipy
+scikit-image
+Pillow
 torch
-tqdm==4.67.1
+torchvision
+tqdm
+seaborn
+PyWavelets
