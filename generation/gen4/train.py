@@ -164,35 +164,35 @@ class SingleCharCritic(nn.Module):
         self.label_emb = nn.Sequential(
             nn.Linear(label_dim, 64),
             nn.LeakyReLU(0.2),
-            nn.Dropout(0.3)
+            # nn.Dropout(0.3)
         )
 
         # Convolutional path (input is 4 channels: 3 RGB + 1 label)
         self.conv1 = nn.Sequential(
             nn.Conv2d(4, 64, 4, 2, 1),
             nn.LeakyReLU(0.2),
-            nn.Dropout2d(0.3)
+            # nn.Dropout2d(0.3)
         )
 
         self.conv2 = nn.Sequential(
             nn.Conv2d(64, 128, 4, 2, 1),
-            nn.InstanceNorm2d(128),
+            nn.LayerNorm([128, 16, 16]),
             nn.LeakyReLU(0.2),
-            nn.Dropout2d(0.3)
+            # nn.Dropout2d(0.3)
         )
 
         self.conv3 = nn.Sequential(
             nn.Conv2d(128, 256, 4, 2, 1),
             nn.InstanceNorm2d(256),
             nn.LeakyReLU(0.2),
-            nn.Dropout2d(0.3)
+            # nn.Dropout2d(0.3)
         )
 
         self.conv4 = nn.Sequential(
             nn.Conv2d(256, 512, 4, 2, 1),
             nn.InstanceNorm2d(512),
             nn.LeakyReLU(0.2),
-            nn.Dropout2d(0.3)
+            # nn.Dropout2d(0.3)
         )
 
         final_h = img_size[0] // 16
@@ -254,7 +254,7 @@ def compute_gradient_penalty(critic, real_samples, fake_samples, labels, device)
 # ============================================================================
 def train_single_char_gan(data_dir, epochs=200, batch_size=64,
                           latent_dim=100, img_size=(64, 64), save_interval=10,
-                          n_critic=5, lambda_gp=10):
+                          n_critic=10, lambda_gp=20):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
@@ -268,8 +268,8 @@ def train_single_char_gan(data_dir, epochs=200, batch_size=64,
     critic = SingleCharCritic(label_dim=label_dim, img_size=img_size).to(device)
 
     # Optimizers
-    optimizer_G = optim.Adam(generator.parameters(), lr=0.0002, betas=(0.0, 0.9))
-    optimizer_C = optim.Adam(critic.parameters(), lr=0.00005, betas=(0.0, 0.9))
+    optimizer_G = optim.Adam(generator.parameters(), lr=0.0001, betas=(0.5, 0.999))
+    optimizer_C = optim.Adam(critic.parameters(), lr=0.00001, betas=(0.5, 0.999))
 
     os.makedirs('generated_chars', exist_ok=True)
     os.makedirs('models_char', exist_ok=True)
@@ -415,8 +415,8 @@ if __name__ == "__main__":
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         img_size=IMG_SIZE,
-        n_critic=5,
-        lambda_gp=10
+        n_critic=10,
+        lambda_gp=20
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
