@@ -8,7 +8,7 @@ import json
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from collections import defaultdict  # ✅ added for grouping
-from train_choice import FeatureExtractor, CharacterMLP
+from traditional_method.train_multilayer_classifier import FeatureExtractor, CharacterMLP
 
 class CharacterClassifier:
     """

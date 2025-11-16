@@ -25,6 +25,28 @@ miniproject/
 │   ├── baseline-char-mlp.py        # MLP on individual characters
 │   ├── ensemble-tree.py            # Tree-based meta-learning ensemble
 │   └── ensemble-add.py             # Weighted averaging ensemble
+├── traditional_method/             # Handcrafted feature extraction methods
+│   ├── train_single_layer_classifier.py    # Single-layer MLP classifier
+│   ├── train_multilayer_classifier.py      # Multi-layer MLP classifier
+│   ├── local_spatial_feature.py    # Local spatial feature extraction
+│   ├── freq_domain_feature.py      # Frequency domain feature extraction
+│   ├── texture_feature.py          # Texture feature extraction
+│   └── inference.py                # Inference script for trained models
+├── preprocess/                     # Data preprocessing utilities
+│   ├── bounding_box.py             # Character detection and bounding box extraction
+│   ├── detect_connected_components.py # Connected component analysis for segmentation
+│   ├── color_analysis.py           # Color space analysis and conversion utilities
+│   ├── process_images.py           # Main preprocessing pipeline
+│   └── utils.py                    # Common preprocessing utilities
+├── scripts/                        # SLURM job submission scripts
+│   ├── run_train_traditional.sh    # Submit traditional method training jobs
+│   ├── run_train_multilayer.sh     # Submit multi-layer training jobs
+│   ├── run_inference.sh            # Submit inference jobs
+│   └── run_label_data.sh           # Submit data labeling jobs
+├── label_data_seq.py               # Sequential data labeling script
+├── label_data_par.py               # Parallel data labeling script
+├── seg_performance_seq.py          # Sequential segmentation performance analysis
+├── segmentation_performance_par.py # Parallel segmentation performance analysis
 ├── requirements.txt                # Python dependencies
 └── README.md                       # This file
 ```
@@ -53,6 +75,119 @@ pip install -r requirements.txt
 ### 3. Download Data
 
 You can download the annotated data [here](https://drive.google.com/file/d/147ZS3WWMwTf-WC53U-yyHbUWJMT4jyUD/view?usp=sharing)
+
+You can download the labeled train data [here](https://drive.google.com/file/d/1Y98elIocUrzXw7s5tYlVDhgUcu8mbBHE/view?usp=sharing), and the labeled test data [here](https://drive.google.com/file/d/16bZt6_axAAsSYWLsMWYbzNm8RFBpPx6O/view?usp=sharing)
+
+### 4. SLURM Job Submission
+
+This project includes SLURM scripts for running jobs on high-performance computing clusters. The scripts are located in the `scripts/` folder and can be used to submit training and inference jobs to the cluster scheduler.
+
+**Available SLURM Scripts:**
+- `run_train_traditional.sh`: Submit traditional method training jobs
+- `run_train_multilayer.sh`: Submit multi-layer classifier training jobs
+- `run_inference.sh`: Submit inference jobs
+- `run_label_data.sh`: Submit data labeling jobs
+
+**Usage:**
+```bash
+# Submit a training job
+sbatch scripts/run_train_traditional.sh traditional_method/train_single_layer_classifier.py data/labeled_train_resized_28x28
+```
+
+## 🔄 Data Preprocessing
+
+Before training any models, the data needs to be preprocessed and organized properly. The preprocessing pipeline includes several steps for individual character extraction.
+
+### Preprocessing Scripts
+
+The `preprocess/` folder contains utility scripts:
+
+- `bounding_box.py`: Character detection and bounding box extraction
+- `detect_connected_components.py`: Connected component analysis for segmentation  
+- `color_analysis.py`: Color space analysis and conversion utilities
+- `process_images.py`: Main preprocessing pipeline
+- `utils.py`: Common preprocessing utilities
+
+### Data Quality Checks
+
+Before preprocessing, verify data quality:
+
+```bash
+python generation/quick_check.py data/train
+```
+
+This script checks:
+- Image dimensions and format consistency
+- Class distribution balance
+- Corrupted or invalid image files
+- Proper folder organization
+
+### Character-Level Preprocessing
+
+For character-level models, individual characters need to be extracted and labeled:
+
+#### 1. **Character Segmentation**
+```bash
+python preprocess/process_images.py --input_folder data/train --output_folder data/segmented_chars
+```
+
+This script:
+- Detects and segments individual characters from CAPTCHA images
+- Uses connected component analysis and bounding box detection
+- Saves each character as a separate image file
+
+#### 2. **Segmentation Quality Analysis**
+Before labeling, analyze the quality of the segmentation process:
+
+```bash
+# Sequential analysis
+python seg_performance_seq.py data/segmented_chars
+
+# Parallel analysis (faster for large datasets)
+python segmentation_performance_par.py data/segmented_chars --verbose
+```
+
+These scripts:
+- Check if the number of segmented characters matches the expected CAPTCHA length
+- Identify folders where segmentation may have failed
+- Generate statistics on segmentation success rates
+- Help identify which CAPTCHAs need manual review
+
+#### 3. **Manual Labeling** 
+```bash
+# Sequential labeling
+python label_data_seq.py data/segmented_chars data/labeled_chars
+
+# Parallel labeling (recommended for large datasets)
+python label_data_par.py data/segmented_chars data/labeled_chars --threads 8
+```
+
+Interactive labeling tools to:
+- Process segmented character images automatically based on folder names
+- Organize characters into class-specific folders (0-9, a-z)
+- Handle parallel processing for faster labeling of large datasets
+- Generate reports on skipped folders due to segmentation issues
+
+#### 4. **Image Resizing and Standardization**
+```bash
+python traditional_method/resize_images.py --input_folder data/labeled_chars --output_folder data/labeled_chars_28x28 --size 28
+```
+
+Standardizes character images:
+- Resize to 28×28 pixels for traditional methods
+
+#### 5. **Data Organization**
+
+The preprocessed data will be organized into the following structure:
+```
+data/
+├── labeled_train_resized_28x28/     # For traditional methods
+│   ├── 0/                           # Contains all '0' character images
+│   ├── 1/                           # Contains all '1' character images
+│   ├── a/                           # Contains all 'a' character images
+│   └── ...                          # Other characters (b-z, 2-9)
+└── labeled_test_resized_28x28/             
+```
 
 ## 🧠 Baseline Models
 
@@ -175,6 +310,91 @@ Simple multilayer perceptron baseline for comparison.
 ```bash
 python baselines/baseline-char-mlp.py
 ```
+
+---
+
+## Handcrafted Feature Extraction Methods
+
+This project supports handcrafted feature extraction methods for character classification. These methods include:
+
+### 1. Local Spatial Features
+- Filters: Low-pass, High-pass, Gaussian, Laplacian, Sobel, Median, Butterworth
+- Statistical features: mean, std, min, max, median for each filter
+
+### 2. Frequency Domain Features
+- Transforms: Fourier, Walsh-Hadamard, KLT, Wavelet, Gabor, Power Spectrum
+- Statistical features extracted from each transform
+
+### 3. Texture Features
+- Methods: GLCM, LBP, Texton, Autocorrelation, PCA, MSMD analysis
+- Statistical features from each texture method
+
+### 4. Raw Pixel Features
+- Basic image statistics as baseline features
+
+### Training Methods
+
+#### Single-Layer Classifier
+The Single-Layer Classifier uses a simpler architecture for character classification. It is suitable for smaller datasets or when computational resources are limited.
+
+**Basic Usage:**
+```bash
+python traditional_method/train_single_layer_classifier.py data/labeled_train_resized_28x28
+```
+
+**Advanced Options:**
+```bash
+python traditional_method/train_single_layer_classifier.py data/labeled_train_resized_28x28 \
+    --batch_size 128 \
+    --epochs 200 \
+    --learning_rate 0.0005 \
+    --hidden_sizes 512 \
+    --dropout_rate 0.4 \
+    --test_size 0.15 \
+    --val_size 0.15
+```
+
+**Parameters:**
+- `input_folder`: Path to folder containing subfolders with images (required)
+- `--batch_size`: Batch size for training (default: 64)
+- `--epochs`: Number of training epochs (default: 100)
+- `--learning_rate`: Learning rate for optimizer (default: 0.001)
+- `--hidden_sizes`: Size of the single hidden layer (default: 512)
+- `--dropout_rate`: Dropout rate for regularization (default: 0.3)
+- `--test_size`: Fraction for test set (default: 0.2)
+- `--val_size`: Fraction for validation set (default: 0.1)
+- `--random_state`: Random seed for reproducibility (default: 42)
+
+#### Multi-Layer Classifier
+The Multi-Layer Classifier uses a deeper architecture with multiple hidden layers. It is designed for larger datasets and more complex feature extraction.
+
+**Basic Usage:**
+```bash
+python traditional_method/train_multilayer_classifier.py data/labeled_train_resized_28x28
+```
+
+**Advanced Options:**
+```bash
+python traditional_method/train_multilayer_classifier.py data/labeled_train_resized_28x28 \
+    --batch_size 128 \
+    --epochs 200 \
+    --learning_rate 0.0005 \
+    --hidden_sizes 1024 512 256 128 \
+    --dropout_rate 0.4 \
+    --test_size 0.15 \
+    --val_size 0.15
+```
+
+**Parameters:**
+- `input_folder`: Path to folder containing subfolders with images (required)
+- `--batch_size`: Batch size for training (default: 64)
+- `--epochs`: Number of training epochs (default: 100)
+- `--learning_rate`: Learning rate for optimizer (default: 0.001)
+- `--hidden_sizes`: List of hidden layer sizes (default: [512, 256, 128])
+- `--dropout_rate`: Dropout rate for regularization (default: 0.3)
+- `--test_size`: Fraction for test set (default: 0.2)
+- `--val_size`: Fraction for validation set (default: 0.1)
+- `--random_state`: Random seed for reproducibility (default: 42)
 
 ---
 
