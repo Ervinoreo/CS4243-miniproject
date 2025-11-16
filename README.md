@@ -1,35 +1,30 @@
-# CAPTCHA Character Detection with YOLOv8
+# CAPTCHA Recognition with Deep Learning
 
-This project implements CAPTCHA character detection using YOLOv8 object detection model. The system can detect and localize individual characters in CAPTCHA images with bounding boxes.
+This project implements various deep learning approaches for CAPTCHA character recognition, including baseline models and ensemble methods. The system can recognize individual characters and complete CAPTCHA sequences using different architectures and combination strategies.
 
-## ��� Project Structure
+## 📁 Project Structure
 
 ```
 miniproject/
-├── data/                           # Original CAPTCHA dataset
-│   ├── train/                      # Training images (PNG format)
-│   │   ├── 002e23-0.png
-│   │   ├── 00995l-0.png
-│   │   └── ...
-│   └── test/                       # Test images (PNG format)
-│       ├── 002e23-0.png
-│       ├── 00995l-0.png
-│       └── ...
-├── CAPTCHA.v1-v1.yolov8/          # Annotated dataset for YOLOv8
-│   ├── data.yaml                   # Dataset configuration
-│   ├── train/
-│   │   ├── images/                 # Training images (JPG format)
-│   │   └── labels/                 # YOLO format annotations (.txt)
-│   ├── valid/
-│   │   ├── images/                 # Validation images
-│   │   └── labels/                 # Validation annotations
-│   └── test/
-│       ├── images/                 # Test images
-│       └── labels/                 # Test annotations
-├── baseline-cnn.py                 # Baseline CNN model implementation
-├── baseline-resnet.py              # ResNet-50 baseline model
-├── yolov8.py                       # YOLOv8 training script
-├── inference.py                    # Inference script for visualization
+├── data/                           # CAPTCHA sequence dataset
+│   ├── train/                      # Training CAPTCHA images
+│   └── test/                       # Test CAPTCHA images
+├── char_dataset/                   # Character-level dataset
+│   ├── labeled_train/              # Training character images (organized by class)
+│   │   ├── 0/                      # Digit 0 images
+│   │   ├── 1/                      # Digit 1 images
+│   │   ├── a/                      # Letter 'a' images
+│   │   └── ...                     # Other characters (0-9, a-z)
+│   └── labeled_test/               # Test character images (organized by class)
+├── baselines/                      # Baseline and ensemble models
+│   ├── baseline-cnn.py             # CNN on CAPTCHA sequences
+│   ├── baseline-resnet.py          # ResNet-50 on CAPTCHA sequences
+│   ├── baseline-char-cnn.py        # CNN on individual characters
+│   ├── baseline-char-resnet.py     # ResNet-50 on individual characters
+│   ├── baseline-char-vgg16.py      # VGG16 on individual characters
+│   ├── baseline-char-mlp.py        # MLP on individual characters
+│   ├── ensemble-tree.py            # Tree-based meta-learning ensemble
+│   └── ensemble-add.py             # Weighted averaging ensemble
 ├── requirements.txt                # Python dependencies
 └── README.md                       # This file
 ```
@@ -38,17 +33,14 @@ miniproject/
 
 ### 1. Environment Setup
 
-Create and activate a virtual environment:
-
 ```bash
 # Create virtual environment
 python -m venv .venv
 
-# Activate virtual environment
-# On macOS/Linux:
+# Activate virtual environment (macOS/Linux)
 source .venv/bin/activate
 
-# On Windows:
+# Activate virtual environment (Windows)
 .venv\Scripts\activate
 ```
 
@@ -58,172 +50,358 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Download Pre-trained Model (Optional)
+## 🧠 Baseline Models
 
-If you want to skip training and use our pre-trained model:
+The project includes two types of baseline models: **sequence-level** models (trained on complete CAPTCHA images) and **character-level** models (trained on individual character images).
 
-📥 **Download the pre-trained YOLOv8 model:**
+### Sequence-Level Models (CAPTCHA Dataset)
 
-- **Google Drive Link**: https://drive.google.com/file/d/1BpvGWbbkIznqvI5VKY-PzjzoJdiF5JD8/view?usp=sharing
-- **File**: `best.pt` (trained YOLOv8 model weights)
+These models process complete CAPTCHA images and output the entire character sequence using CTC loss for sequence-to-sequence learning.
 
-**Setup instructions:**
+#### 1. **Baseline CNN** (`baseline-cnn.py`)
 
-1. Download `best.pt` from the Google Drive link
-2. Create the model directory structure:
-   ```bash
-   mkdir -p captcha_detection/yolov8n_captcha_v1/weights/
-   ```
-3. Place the downloaded `best.pt` file in:
-   ```
-   captcha_detection/yolov8n_captcha_v1/weights/best.pt
-   ```
+A custom CNN architecture with bidirectional LSTM for sequence modeling.
 
-**Now you can skip to step 5 (Run Inference) if using the pre-trained model!**
+**Architecture:**
 
-### 4. Train YOLOv8 Model (Skip if using pre-trained model)
+- Input: Grayscale images (200×80)
+- 4 Convolutional layers (32, 64, 128, 256 filters)
+- Batch normalization and max pooling after each conv layer
+- Bidirectional LSTM (2 layers, 256 hidden units)
+- CTC loss for sequence alignment
+
+**Usage:**
 
 ```bash
-python yolov8.py
+python baselines/baseline-cnn.py
 ```
 
-The training script will:
+#### 2. **Baseline ResNet-50** (`baseline-resnet.py`)
 
-- Load the annotated dataset from `CAPTCHA.v1-v1.yolov8/`
-- Train a YOLOv8 nano model for character detection
-- Save the best model weights to `captcha_detection/yolov8n_captcha_v1/weights/best.pt`
-- Generate training curves and validation metrics
+Pre-trained ResNet-50 adapted for CAPTCHA sequence recognition.
 
-### 5. Run Inference
+**Architecture:**
 
-To perform inference and visualize results:
+- Input: RGB images (200×80)
+- Pre-trained ResNet-50 backbone
+- Bidirectional LSTM (2 layers, 256 hidden units)
+- CTC loss for sequence alignment
 
-1. **Update the model path** in `inference.py` (if needed):
-
-   ```python
-   MODEL_PATH = "captcha_detection/yolov8n_captcha_v1/weights/best.pt"
-   ```
-
-2. **Set the input folder** (choose one):
-
-   ```python
-   # For original test images:
-   INPUT_FOLDER = "data/train"
-
-   # For original test images:
-   INPUT_FOLDER = "data/test"
-   ```
-
-3. **Run inference**:
-   ```bash
-   python inference.py
-   ```
-
-Results will be saved in the `inference/` folder with bounding boxes drawn on the images.
-
-
-## � Traditional Preprocessing Methods
-
-In addition to the YOLOv8 approach, this project includes comprehensive traditional computer vision preprocessing methods for CAPTCHA character segmentation. These methods use color analysis, connected component detection, and morphological operations to automatically segment individual characters from CAPTCHA images.
-
-### Overview
-
-The traditional preprocessing pipeline implements a multi-stage approach:
-
-1. **Color Mask Creation**: Identifies colored regions by excluding white and black pixels
-2. **Mask Smoothening**: Applies averaging filters to reduce noise
-3. **Connected Component Detection**: Uses DFS to find character regions
-4. **Color Analysis with DBSCAN**: Clusters pixels to identify distinct character colors
-5. **Bounding Box Processing**: Merges nearby components and filters by size/density
-6. **Character Segmentation**: Extracts individual character segments with color masking
-
-### Usage
-
-Run the traditional preprocessing pipeline on your CAPTCHA images:
+**Usage:**
 
 ```bash
-# Basic usage with automatic CPU detection
-python preprocess/process_unclear_images.py ./data/medium/ -o output_medium -w 250 -b 5 -k 3 -s 3 -m 40 -t 1.1 -p 3 -c 30 -mul 2.0 --size-ratio-threshold 0.4 --large-box-ratio 2.5 --wide-box-color-threshold 30
-
-# For large datasets (7000+ images), specify number of worker processes
-python preprocess/process_unclear_images.py ./data/medium/ -o output_medium -j 8 -w 250 -b 5 -k 3 -s 3 -m 40 -t 1.1 -p 3 -c 30 -mul 2.0 --size-ratio-threshold 0.4 --large-box-ratio 2.5 --wide-box-color-threshold 30
-
-# Use all available CPU cores (default behavior)
-python preprocess/process_unclear_images.py ./data/medium/ -o output_medium --workers 16 [other parameters...]
-
-# Use single process for debugging
-python preprocess/process_unclear_images.py ./data/medium/ -o output_medium -j 1 [other parameters...]
+python baselines/baseline-resnet.py
 ```
 
-### Parameters Explanation
+---
 
-#### Core Parameters
-- `./data/medium/` - Input folder containing CAPTCHA images
-- `-o output_medium` - Output folder for processed results
-- `-j 8` or `--workers 8` - Number of worker processes for parallel processing (default: use all CPU cores)
+### Character-Level Models (Character Dataset)
 
-#### Image Processing Parameters
-- `-w 250` - White threshold (pixels above this are considered white)
-- `-b 5` - Black threshold (pixels below this are considered black)
-- `-k 3` - Kernel size for mask smoothening
-- `-s 3` - Stride for smoothening operations
-- `-m 40` - Minimum area for connected components
-- `-t 1.1` - Width threshold for detecting wide bounding boxes
-- `-p 3` - Padding around extracted character segments
-- `-c 30` - Color similarity threshold for character masking
-- `-mul 2.0` - Size multiplier for filtering large boxes
-- `--size-ratio-threshold 0.4` - Minimum box size ratio to median
-- `--large-box-ratio 2.5` - Maximum box size ratio to median
-- `--wide-box-color-threshold 30` - Color threshold for wide box processing
+These models classify individual characters (36 classes: 0-9, a-z) extracted from CAPTCHA images. After training, they predict each character independently and aggregate results to form complete CAPTCHA predictions.
 
-### Output Structure
+#### 3. **Character-Level CNN** (`baseline-char-cnn.py`)
 
-The preprocessing generates:
+Lightweight CNN for individual character classification.
 
-```
-output_medium/
-├── debug/                          # Combined visualization images
-│   ├── hyperparameters.json       # Processing parameters used
-│   └── [image_name]_combined.png   # Original + mask + bounding boxes
-├── [image_name]/                   # Individual character segments
-│   ├── valid_000.png              # Characters from DFS detection
-│   ├── valid_001.png
-│   ├── char_000.png               # Characters from color clustering
-│   └── char_001.png
-└── ...
+**Architecture:**
+
+- Input: Grayscale images (32×32)
+- 4 Convolutional layers (32, 64, 128, 256 filters)
+- Batch normalization and max pooling
+- 3 Fully connected layers (512, 128, 36)
+- Dropout (0.5) for regularization
+- Cross-entropy loss
+
+**Usage:**
+
+```bash
+python baselines/baseline-char-cnn.py
 ```
 
-### Key Features
+#### 4. **Character-Level ResNet-50** (`baseline-char-resnet.py`)
 
-- **Multi-Color Character Detection**: Uses DBSCAN clustering to identify characters of different colors
-- **Adaptive Bounding Box Processing**: Merges nearby components and handles nested characters
-- **Size-Based Filtering**: Removes outlier boxes based on statistical analysis
-- **Color Masking**: Applies targeted color filtering to improve character clarity
-- **Wide Box Handling**: Special processing for boxes containing multiple characters
-- **Parallel Processing**: Supports multiprocessing for efficient handling of large datasets (7000+ images)
+Transfer learning with pre-trained ResNet-50 for character classification.
 
-### Performance Optimization
+**Architecture:**
 
-The preprocessing pipeline supports parallel processing to handle large datasets efficiently:
+- Input: RGB images (224×224)
+- Pre-trained ResNet-50 backbone
+- Custom classifier head (512, 36 classes)
+- Dropout (0.5, 0.3)
+- Cross-entropy loss
 
-- **Automatic CPU Detection**: Uses all available CPU cores by default
-- **Configurable Workers**: Specify exact number of worker processes with `-j` or `--workers`
-- **Scalable Performance**: Achieves 3-16x speedup depending on your system's CPU cores
-- **Memory Efficient**: Uses multiprocessing Pool for optimal resource management
+**Usage:**
 
-**Performance Examples:**
-- 4-core system: ~3-4x faster processing
-- 8-core system: ~6-8x faster processing
-- 16-core system: ~12-16x faster processing
+```bash
+python baselines/baseline-char-resnet.py
+```
 
-For processing 7000+ images, using multiple workers significantly reduces processing time from hours to minutes.
+#### 5. **Character-Level VGG16** (`baseline-char-vgg16.py`)
 
-### Traditional Methods Components
+Transfer learning with pre-trained VGG16 for character classification.
 
-The preprocessing system includes several specialized modules:
+**Architecture:**
 
-- `detect_connected_components.py` - Core DFS-based component detection
-- `color_analysis.py` - DBSCAN clustering for color extraction
-- `bounding_box.py` - Box merging and filtering algorithms
-- `segmentation.py` - Character extraction and segmentation
-- `utils.py` - Utility functions and parameter saving
+- Input: RGB images (224×224)
+- Pre-trained VGG16 backbone
+- Custom classifier head (4096, 2048, 512, 36)
+- Dropout (0.5, 0.5, 0.3)
+- Cross-entropy loss
+
+**Usage:**
+
+```bash
+python baselines/baseline-char-vgg16.py
+```
+
+#### 6. **Character-Level MLP** (`baseline-char-mlp.py`)
+
+Simple multilayer perceptron baseline for comparison.
+
+**Architecture:**
+
+- Input: Flattened grayscale images (32×32 = 1024)
+- 3 Hidden layers (512, 256, 128)
+- Dropout (0.5, 0.3, 0.3)
+- Output layer (36 classes)
+- Cross-entropy loss
+
+**Usage:**
+
+```bash
+python baselines/baseline-char-mlp.py
+```
+
+---
+
+## 🤝 Ensemble Methods
+
+Ensemble methods combine predictions from multiple character-level models (CNN, ResNet-50, VGG16) to improve overall accuracy. All ensemble models operate on the **character dataset**.
+
+### 1. **Tree-Based Meta-Learning Ensemble** (`ensemble-tree.py`)
+
+Uses a meta-learner (decision tree or logistic regression) to combine base model predictions.
+
+**How It Works:**
+
+- Trains three base models (CNN, ResNet50, VGG16) independently on character images
+- Collects softmax probability outputs (36 classes) from each model on the validation set
+- Concatenates probability vectors (108 features: 36 × 3 models) as meta-features
+- Trains a meta-learner (logistic regression with StandardScaler) on these features
+- Meta-learner learns to weight and combine base model predictions optimally
+
+**Key Features:**
+
+- Uses full probability distributions (not just predictions) for richer information
+- Regularized logistic regression prevents overfitting
+- Can capture non-linear interactions between model predictions
+
+**Usage:**
+
+```bash
+python baselines/ensemble-tree.py
+```
+
+### 2. **Weighted Averaging Ensemble** (`ensemble-add.py`)
+
+Tests three weighted averaging strategies simultaneously in a single run.
+
+**Ensemble Methods Tested:**
+
+#### a) **Simple Average Ensemble**
+
+- Assigns equal weights (1/3, 1/3, 1/3) to all three models
+- Averages softmax probability distributions before final prediction
+- Most straightforward approach, assumes all models contribute equally
+- Robust against individual model biases
+
+#### b) **Weighted Average Ensemble**
+
+- Assigns weights based on individual validation accuracies
+- Models with higher accuracy get proportionally more influence
+- Weights are normalized to sum to 1
+- More adaptive than simple averaging while remaining interpretable
+
+#### c) **Learned Weights Ensemble**
+
+- Uses numerical optimization (scipy.minimize) to find optimal weights
+- Maximizes ensemble accuracy on the validation set
+- Constrained optimization: weights sum to 1 and are non-negative
+- Learns the best linear combination of model predictions
+- May be more sensitive to validation set characteristics
+
+**How Weighted Averaging Works:**
+
+1. Each model outputs softmax probabilities for 36 classes
+2. Ensemble combines probabilities using weighted average:
+   ```
+   P_ensemble(class_i) = w1 × P_CNN(i) + w2 × P_ResNet(i) + w3 × P_VGG(i)
+   ```
+3. Final prediction: `argmax(P_ensemble)`
+4. Resulting probabilities still sum to 1 (valid probability distribution)
+
+**Usage:**
+
+```bash
+python baselines/ensemble-add.py
+```
+
+**Output:**
+The script will test all three methods and display:
+
+- Validation accuracies for each method
+- Optimal weights learned for each approach
+- Character-level and CAPTCHA-level accuracy comparisons
+- Improvement over best individual model
+- Identifies the best performing ensemble method automatically
+
+---
+
+## 📊 Evaluation Metrics
+
+All models report the following metrics:
+
+### Character-Level Metrics:
+
+- **Accuracy**: Percentage of correctly classified characters
+- **Precision**: Weighted and macro-averaged precision
+- **Recall**: Weighted and macro-averaged recall
+- **F1-Score**: Weighted and macro-averaged F1-score
+
+### CAPTCHA-Level Metrics:
+
+- **CAPTCHA Accuracy**: Percentage of completely correct CAPTCHA predictions
+  - A CAPTCHA is considered correct only if ALL characters are predicted correctly
+  - For length-6 CAPTCHA: if per-character accuracy is 0.90, CAPTCHA accuracy ≈ 0.90^6 = 0.53
+
+---
+
+## 📈 Model Outputs
+
+Each training script generates:
+
+### Saved Models:
+
+- `best_model.pth` or `best_[model_name]_model.pth` - Best model weights based on validation accuracy
+
+### Ensemble-Specific Outputs:
+
+- `meta_learner.pkl` - Trained meta-learner (tree ensemble)
+- `ensemble_weights_all.npy` - Learned weights for all averaging methods
+
+### Visualization:
+
+- Training/validation loss and accuracy curves
+- Model comparison bar charts
+- Confusion matrices (for character-level models)
+
+### Results:
+
+- `test_results.txt` - Human-readable test metrics
+- `test_results.pkl` - Detailed results for further analysis
+
+---
+
+## 🎯 Dataset Requirements
+
+### CAPTCHA Sequence Dataset (`data/`)
+
+Used by: `baseline-cnn.py`, `baseline-resnet.py`
+
+**Format:**
+
+- Images: CAPTCHA images with multiple characters
+- Naming: `[captcha_text]-[augmentation_id].png`
+- Example: `002e23-0.png` contains the text "002e23"
+
+### Character Dataset (`char_dataset/`)
+
+Used by: All `baseline-char-*.py` and `ensemble-*.py` files
+
+**Structure:**
+
+```
+char_dataset/
+├── labeled_train/
+│   ├── 0/          # Contains all training images of digit '0'
+│   ├── 1/          # Contains all training images of digit '1'
+│   ├── a/          # Contains all training images of letter 'a'
+│   └── ...         # 36 folders total (0-9, a-z)
+└── labeled_test/
+    ├── 0/
+    ├── 1/
+    └── ...
+```
+
+**Image Naming Convention:**
+
+- Format: `[captcha_id]_[position].png`
+- Example: `002e23_000.png` is the first character (position 0) from CAPTCHA "002e23"
+- This allows models to aggregate character predictions back into complete CAPTCHA strings
+
+---
+
+## 🔬 Experimental Results
+
+### Individual Model Performance:
+
+- **ResNet-50 (char)**: Best single model performance (~90-91% character accuracy)
+- **VGG16 (char)**: Second best (~89-90% character accuracy)
+- **CNN (char)**: Lightweight with good performance (~87-88% character accuracy)
+- **MLP (char)**: Baseline comparison (~70-75% character accuracy)
+
+### Ensemble Performance:
+
+- **Learned Weights**: Typically achieves highest accuracy (+0.5-1.5% over best individual)
+- **Weighted Average**: Close second (+0.3-1.0% improvement)
+- **Simple Average**: Still improves over individual models (+0.2-0.8%)
+- **Tree Meta-Learner**: Can overfit if not properly regularized
+
+**Key Insight:** Ensemble methods consistently outperform individual models by combining their complementary strengths, with learned weights optimization providing the best results when properly constrained.
+
+---
+
+## 🛠️ Customization
+
+### Hyperparameter Tuning:
+
+All scripts include configurable parameters at the top of the `main()` function:
+
+- `EPOCHS`: Number of training epochs
+- `BATCH_SIZE`: Training batch size
+- `LEARNING_RATE`: Optimizer learning rate
+- Image dimensions and preprocessing options
+
+### Ensemble Configuration:
+
+In `ensemble-add.py`, you can modify:
+
+```python
+self.ensemble_methods = ['simple_average', 'weighted_average', 'learned_weights']
+```
+
+To test only specific ensemble strategies.
+
+---
+
+## 📝 Notes
+
+- **GPU Recommended**: Training on GPU is highly recommended for ResNet-50 and VGG16 models
+- **Training Time**: Character-level models train faster than sequence-level models
+- **Ensemble Benefits**: Most noticeable when base models have similar but not identical accuracy
+- **Data Requirements**: Character-level models require pre-segmented character images
+
+---
+
+## 📚 References
+
+- **ResNet**: He et al., "Deep Residual Learning for Image Recognition" (2016)
+- **VGG**: Simonyan & Zisserman, "Very Deep Convolutional Networks for Large-Scale Image Recognition" (2015)
+- **CTC Loss**: Graves et al., "Connectionist Temporal Classification" (2006)
+- **Ensemble Learning**: Zhou, "Ensemble Methods: Foundations and Algorithms" (2012)
+
+---
+
+## 📧 Contact
+
+For questions or issues, please open an issue in the repository.
