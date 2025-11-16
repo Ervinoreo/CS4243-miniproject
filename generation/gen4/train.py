@@ -405,7 +405,7 @@ def generate_character(generator, dataset, char, device='cuda', num_samples=4):
 # Main execution
 # ============================================================================
 if __name__ == "__main__":
-    DATA_DIR = "/Users/bytedance/Documents/cs4243/labeled_data_train"
+    DATA_DIR = "/cs4243/labeled_data_train"
     EPOCHS = 200
     BATCH_SIZE = 64
     IMG_SIZE = (64, 64)
