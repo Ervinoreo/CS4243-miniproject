@@ -50,6 +50,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### 3. Download Data
+
+You can download the annotated data [here](https://drive.google.com/file/d/147ZS3WWMwTf-WC53U-yyHbUWJMT4jyUD/view?usp=sharing)
+
 ## 🧠 Baseline Models
 
 The project includes two types of baseline models: **sequence-level** models (trained on complete CAPTCHA images) and **character-level** models (trained on individual character images).
