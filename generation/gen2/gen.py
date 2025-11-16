@@ -371,7 +371,7 @@ def generate_captcha(generator, dataset, text, device='cuda', num_samples=1):
 
 if __name__ == "__main__":
     # Configuration
-    DATA_DIR = "data/train"
+    DATA_DIR = "/cs4243/data/train"
     EPOCHS = 200
     BATCH_SIZE = 32
     IMG_SIZE = (64, 200)
