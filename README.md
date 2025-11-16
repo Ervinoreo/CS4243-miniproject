@@ -25,6 +25,17 @@ miniproject/
 │   ├── baseline-char-mlp.py        # MLP on individual characters
 │   ├── ensemble-tree.py            # Tree-based meta-learning ensemble
 │   └── ensemble-add.py             # Weighted averaging ensemble
+├── generation/                     # Generative CAPTCHA models (GANs)
+│   ├── train.py                    # Single-character CGAN training (TensorFlow)
+│   ├── generate.py                 # Single-character CGAN synthesis
+│   ├── quick_check.py              # Data sanity checks
+│   ├── test_accuracy.py            # Generation model evaluation
+│   ├── gen2/                       # Full-image Conditional GAN (PyTorch)
+│   │   └── gen.py                  # Train and sample
+│   ├── gen3/                       # Full-image WGAN-GP (PyTorch)
+│   │   └── gen.py                  # Train and sample
+│   └── gen4/                       # Single-character WGAN-GP (PyTorch)
+│       └── train.py                # Train character generator
 ├── traditional_method/             # Handcrafted feature extraction methods
 │   ├── train_single_layer_classifier.py    # Single-layer MLP classifier
 │   ├── train_multilayer_classifier.py      # Multi-layer MLP classifier
@@ -480,6 +491,45 @@ The script will test all three methods and display:
 - Identifies the best performing ensemble method automatically
 
 ---
+
+## 🎨 CAPTCHA Generation (GANs)
+
+This project includes generative models for synthesizing CAPTCHA images in `generation/`. Use them to augment training data or evaluate robustness.
+
+### 1. Single-Character Conditional GAN (TensorFlow)
+- Training: `generation/train.py`
+- Generation: `generation/generate.py`
+- Usage:
+```bash
+python generation/train.py
+python generation/generate.py
+```
+
+### 2. Full-Image Conditional GAN (`gen2`, PyTorch)
+- Script: `generation/gen2/gen.py`
+- Produces 64×200 RGB CAPTCHA conditioned on full text
+- Usage:
+```bash
+python generation/gen2/gen.py
+```
+
+### 3. Full-Image WGAN-GP (`gen3`, PyTorch)
+- Script: `generation/gen3/gen.py`
+- More stable training via critic and gradient penalty
+- Outputs saved to `generation/gen3/generated_samples_1` and `generation/gen3/models`
+- Usage:
+```bash
+python generation/gen3/gen.py
+```
+
+### 4. Single-Character WGAN-GP (`gen4`, PyTorch)
+- Training: `generation/gen4/train.py`
+- Generation: `generation/gen4/generate.py --model_path <path_to_model.pth> --text "yourtext"`
+- Usage:
+```bash
+python generation/gen4/train.py
+python generation/gen4/generate.py --model_path <path_to_model.pth> --text "yourtext"
+```
 
 ## 📊 Evaluation Metrics
 
