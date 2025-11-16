@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 import numpy as np
+from tqdm import tqdm
 
 
 class CaptchaDataset(Dataset):
@@ -240,14 +241,23 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0002,
     print(f"Using device: {device}")
 
     # Create dataset and dataloader
+    print(f"Creating dataset from: {data_dir}")
     dataset = CaptchaDataset(data_dir, img_size=img_size)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
     label_dim = dataset.max_len * dataset.vocab_size
+    print(f"Label dimension: {label_dim}")
 
     # Initialize models
+    print("Initializing Generator and Discriminator...")
     generator = Generator(latent_dim=latent_dim, label_dim=label_dim, img_size=img_size).to(device)
     discriminator = Discriminator(label_dim=label_dim, img_size=img_size).to(device)
+    
+    # Count parameters
+    g_params = sum(p.numel() for p in generator.parameters() if p.requires_grad)
+    d_params = sum(p.numel() for p in discriminator.parameters() if p.requires_grad)
+    print(f"Generator parameters: {g_params:,}")
+    print(f"Discriminator parameters: {d_params:,}")
 
     # Loss and optimizers
     criterion = nn.BCELoss()
@@ -257,10 +267,16 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0002,
     # Create output directories
     os.makedirs('generated_samples', exist_ok=True)
     os.makedirs('models', exist_ok=True)
+    print("Output directories created: generated_samples/, models/")
 
+    print(f"\nStarting training for {epochs} epochs...")
+    print(f"Batch size: {batch_size}, Learning rate: {lr}")
+    
     # Training loop
     for epoch in range(epochs):
-        for i, (real_imgs, labels, _) in enumerate(dataloader):
+        epoch_pbar = tqdm(enumerate(dataloader), total=len(dataloader), 
+                         desc=f"Epoch {epoch+1}/{epochs}", leave=False)
+        for i, (real_imgs, labels, _) in epoch_pbar:
             batch_size = real_imgs.size(0)
 
             # Move to device
@@ -300,13 +316,15 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0002,
             d_loss.backward()
             optimizer_D.step()
 
-            # Print progress
-            if i % 50 == 0:
-                print(f"[Epoch {epoch}/{epochs}] [Batch {i}/{len(dataloader)}] "
-                      f"[D loss: {d_loss.item():.4f}] [G loss: {g_loss.item():.4f}]")
+            # Update progress bar
+            epoch_pbar.set_postfix({
+                'D_loss': f"{d_loss.item():.4f}",
+                'G_loss': f"{g_loss.item():.4f}"
+            })
 
         # Save samples and models
         if epoch % save_interval == 0:
+            print(f"\nSaving samples and model for epoch {epoch}...")
             # Generate sample images
             generator.eval()
             with torch.no_grad():
@@ -320,6 +338,7 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0002,
                 from torchvision.utils import save_image
                 save_image(gen_imgs, f'generated_samples/epoch_{epoch}.png',
                            nrow=4, normalize=True)
+                print(f"Sample images saved to generated_samples/epoch_{epoch}.png")
             generator.train()
 
             # Save models
@@ -331,6 +350,7 @@ def train_cgan(data_dir, epochs=200, batch_size=32, lr=0.0002,
                 'epoch': epoch,
                 'vocab': dataset.char_to_idx
             }, f'models/cgan_epoch_{epoch}.pth')
+            print(f"Model saved to models/cgan_epoch_{epoch}.pth")
 
     print("Training complete!")
     return generator, discriminator, dataset

@@ -1,35 +1,52 @@
-# CAPTCHA Character Detection with YOLOv8
+# CAPTCHA Recognition with Deep Learning
 
-This project implements CAPTCHA character detection using YOLOv8 object detection model. The system can detect and localize individual characters in CAPTCHA images with bounding boxes.
+This project implements various deep learning approaches for CAPTCHA character recognition, including baseline models and ensemble methods. The system can recognize individual characters and complete CAPTCHA sequences using different architectures and combination strategies.
 
-## ��� Project Structure
+## 📁 Project Structure
 
 ```
 miniproject/
-├── data/                           # Original CAPTCHA dataset
-│   ├── train/                      # Training images (PNG format)
-│   │   ├── 002e23-0.png
-│   │   ├── 00995l-0.png
-│   │   └── ...
-│   └── test/                       # Test images (PNG format)
-│       ├── 002e23-0.png
-│       ├── 00995l-0.png
-│       └── ...
-├── CAPTCHA.v1-v1.yolov8/          # Annotated dataset for YOLOv8
-│   ├── data.yaml                   # Dataset configuration
-│   ├── train/
-│   │   ├── images/                 # Training images (JPG format)
-│   │   └── labels/                 # YOLO format annotations (.txt)
-│   ├── valid/
-│   │   ├── images/                 # Validation images
-│   │   └── labels/                 # Validation annotations
-│   └── test/
-│       ├── images/                 # Test images
-│       └── labels/                 # Test annotations
-├── baseline-cnn.py                 # Baseline CNN model implementation
-├── baseline-resnet.py              # ResNet-50 baseline model
-├── yolov8.py                       # YOLOv8 training script
-├── inference.py                    # Inference script for visualization
+├── data/                           # CAPTCHA sequence dataset
+│   ├── train/                      # Training CAPTCHA images
+│   └── test/                       # Test CAPTCHA images
+├── char_dataset/                   # Character-level dataset
+│   ├── labeled_train/              # Training character images (organized by class)
+│   │   ├── 0/                      # Digit 0 images
+│   │   ├── 1/                      # Digit 1 images
+│   │   ├── a/                      # Letter 'a' images
+│   │   └── ...                     # Other characters (0-9, a-z)
+│   └── labeled_test/               # Test character images (organized by class)
+├── baselines/                      # Baseline and ensemble models
+│   ├── baseline-cnn.py             # CNN on CAPTCHA sequences
+│   ├── baseline-resnet.py          # ResNet-50 on CAPTCHA sequences
+│   ├── baseline-char-cnn.py        # CNN on individual characters
+│   ├── baseline-char-resnet.py     # ResNet-50 on individual characters
+│   ├── baseline-char-vgg16.py      # VGG16 on individual characters
+│   ├── baseline-char-mlp.py        # MLP on individual characters
+│   ├── ensemble-tree.py            # Tree-based meta-learning ensemble
+│   └── ensemble-add.py             # Weighted averaging ensemble
+├── traditional_method/             # Handcrafted feature extraction methods
+│   ├── train_single_layer_classifier.py    # Single-layer MLP classifier
+│   ├── train_multilayer_classifier.py      # Multi-layer MLP classifier
+│   ├── local_spatial_feature.py    # Local spatial feature extraction
+│   ├── freq_domain_feature.py      # Frequency domain feature extraction
+│   ├── texture_feature.py          # Texture feature extraction
+│   └── inference.py                # Inference script for trained models
+├── preprocess/                     # Data preprocessing utilities
+│   ├── bounding_box.py             # Character detection and bounding box extraction
+│   ├── detect_connected_components.py # Connected component analysis for segmentation
+│   ├── color_analysis.py           # Color space analysis and conversion utilities
+│   ├── process_images.py           # Main preprocessing pipeline
+│   └── utils.py                    # Common preprocessing utilities
+├── scripts/                        # SLURM job submission scripts
+│   ├── run_train_traditional.sh    # Submit traditional method training jobs
+│   ├── run_train_multilayer.sh     # Submit multi-layer training jobs
+│   ├── run_inference.sh            # Submit inference jobs
+│   └── run_label_data.sh           # Submit data labeling jobs
+├── label_data_seq.py               # Sequential data labeling script
+├── label_data_par.py               # Parallel data labeling script
+├── seg_performance_seq.py          # Sequential segmentation performance analysis
+├── segmentation_performance_par.py # Parallel segmentation performance analysis
 ├── requirements.txt                # Python dependencies
 └── README.md                       # This file
 ```
@@ -38,17 +55,14 @@ miniproject/
 
 ### 1. Environment Setup
 
-Create and activate a virtual environment:
-
 ```bash
 # Create virtual environment
 python -m venv .venv
 
-# Activate virtual environment
-# On macOS/Linux:
+# Activate virtual environment (macOS/Linux)
 source .venv/bin/activate
 
-# On Windows:
+# Activate virtual environment (Windows)
 .venv\Scripts\activate
 ```
 
@@ -58,172 +72,451 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Download Pre-trained Model (Optional)
+### 3. Download Data
 
-If you want to skip training and use our pre-trained model:
+You can download the annotated data [here](https://drive.google.com/file/d/147ZS3WWMwTf-WC53U-yyHbUWJMT4jyUD/view?usp=sharing)
 
-📥 **Download the pre-trained YOLOv8 model:**
+You can download the labeled train data [here](https://drive.google.com/file/d/1Y98elIocUrzXw7s5tYlVDhgUcu8mbBHE/view?usp=sharing), and the labeled test data [here](https://drive.google.com/file/d/16bZt6_axAAsSYWLsMWYbzNm8RFBpPx6O/view?usp=sharing)
 
-- **Google Drive Link**: https://drive.google.com/file/d/1BpvGWbbkIznqvI5VKY-PzjzoJdiF5JD8/view?usp=sharing
-- **File**: `best.pt` (trained YOLOv8 model weights)
+### 4. SLURM Job Submission
 
-**Setup instructions:**
+This project includes SLURM scripts for running jobs on high-performance computing clusters. The scripts are located in the `scripts/` folder and can be used to submit training and inference jobs to the cluster scheduler.
 
-1. Download `best.pt` from the Google Drive link
-2. Create the model directory structure:
-   ```bash
-   mkdir -p captcha_detection/yolov8n_captcha_v1/weights/
-   ```
-3. Place the downloaded `best.pt` file in:
-   ```
-   captcha_detection/yolov8n_captcha_v1/weights/best.pt
-   ```
+**Available SLURM Scripts:**
+- `run_train_traditional.sh`: Submit traditional method training jobs
+- `run_train_multilayer.sh`: Submit multi-layer classifier training jobs
+- `run_inference.sh`: Submit inference jobs
+- `run_label_data.sh`: Submit data labeling jobs
 
-**Now you can skip to step 5 (Run Inference) if using the pre-trained model!**
+**Usage:**
+```bash
+# Submit a training job
+sbatch scripts/run_train_traditional.sh traditional_method/train_single_layer_classifier.py data/labeled_train_resized_28x28
+```
 
-### 4. Train YOLOv8 Model (Skip if using pre-trained model)
+## 🔄 Data Preprocessing
+
+Before training any models, the data needs to be preprocessed and organized properly. The preprocessing pipeline includes several steps for individual character extraction.
+
+### Preprocessing Scripts
+
+The `preprocess/` folder contains utility scripts:
+
+- `bounding_box.py`: Character detection and bounding box extraction
+- `detect_connected_components.py`: Connected component analysis for segmentation  
+- `color_analysis.py`: Color space analysis and conversion utilities
+- `process_images.py`: Main preprocessing pipeline
+- `utils.py`: Common preprocessing utilities
+
+### Data Quality Checks
+
+Before preprocessing, verify data quality:
 
 ```bash
-python yolov8.py
+python generation/quick_check.py data/train
 ```
 
-The training script will:
+This script checks:
+- Image dimensions and format consistency
+- Class distribution balance
+- Corrupted or invalid image files
+- Proper folder organization
 
-- Load the annotated dataset from `CAPTCHA.v1-v1.yolov8/`
-- Train a YOLOv8 nano model for character detection
-- Save the best model weights to `captcha_detection/yolov8n_captcha_v1/weights/best.pt`
-- Generate training curves and validation metrics
+### Character-Level Preprocessing
 
-### 5. Run Inference
+For character-level models, individual characters need to be extracted and labeled:
 
-To perform inference and visualize results:
+#### 1. **Character Segmentation**
+```bash
+python preprocess/process_images.py --input_folder data/train --output_folder data/segmented_chars
+```
 
-1. **Update the model path** in `inference.py` (if needed):
+This script:
+- Detects and segments individual characters from CAPTCHA images
+- Uses connected component analysis and bounding box detection
+- Saves each character as a separate image file
 
-   ```python
-   MODEL_PATH = "captcha_detection/yolov8n_captcha_v1/weights/best.pt"
-   ```
-
-2. **Set the input folder** (choose one):
-
-   ```python
-   # For original test images:
-   INPUT_FOLDER = "data/train"
-
-   # For original test images:
-   INPUT_FOLDER = "data/test"
-   ```
-
-3. **Run inference**:
-   ```bash
-   python inference.py
-   ```
-
-Results will be saved in the `inference/` folder with bounding boxes drawn on the images.
-
-
-## � Traditional Preprocessing Methods
-
-In addition to the YOLOv8 approach, this project includes comprehensive traditional computer vision preprocessing methods for CAPTCHA character segmentation. These methods use color analysis, connected component detection, and morphological operations to automatically segment individual characters from CAPTCHA images.
-
-### Overview
-
-The traditional preprocessing pipeline implements a multi-stage approach:
-
-1. **Color Mask Creation**: Identifies colored regions by excluding white and black pixels
-2. **Mask Smoothening**: Applies averaging filters to reduce noise
-3. **Connected Component Detection**: Uses DFS to find character regions
-4. **Color Analysis with DBSCAN**: Clusters pixels to identify distinct character colors
-5. **Bounding Box Processing**: Merges nearby components and filters by size/density
-6. **Character Segmentation**: Extracts individual character segments with color masking
-
-### Usage
-
-Run the traditional preprocessing pipeline on your CAPTCHA images:
+#### 2. **Segmentation Quality Analysis**
+Before labeling, analyze the quality of the segmentation process:
 
 ```bash
-# Basic usage with automatic CPU detection
-python preprocess/process_unclear_images.py ./data/medium/ -o output_medium -w 250 -b 5 -k 3 -s 3 -m 40 -t 1.1 -p 3 -c 30 -mul 2.0 --size-ratio-threshold 0.4 --large-box-ratio 2.5 --wide-box-color-threshold 30
+# Sequential analysis
+python seg_performance_seq.py data/segmented_chars
 
-# For large datasets (7000+ images), specify number of worker processes
-python preprocess/process_unclear_images.py ./data/medium/ -o output_medium -j 8 -w 250 -b 5 -k 3 -s 3 -m 40 -t 1.1 -p 3 -c 30 -mul 2.0 --size-ratio-threshold 0.4 --large-box-ratio 2.5 --wide-box-color-threshold 30
-
-# Use all available CPU cores (default behavior)
-python preprocess/process_unclear_images.py ./data/medium/ -o output_medium --workers 16 [other parameters...]
-
-# Use single process for debugging
-python preprocess/process_unclear_images.py ./data/medium/ -o output_medium -j 1 [other parameters...]
+# Parallel analysis (faster for large datasets)
+python segmentation_performance_par.py data/segmented_chars --verbose
 ```
 
-### Parameters Explanation
+These scripts:
+- Check if the number of segmented characters matches the expected CAPTCHA length
+- Identify folders where segmentation may have failed
+- Generate statistics on segmentation success rates
+- Help identify which CAPTCHAs need manual review
 
-#### Core Parameters
-- `./data/medium/` - Input folder containing CAPTCHA images
-- `-o output_medium` - Output folder for processed results
-- `-j 8` or `--workers 8` - Number of worker processes for parallel processing (default: use all CPU cores)
+#### 3. **Manual Labeling** 
+```bash
+# Sequential labeling
+python label_data_seq.py data/segmented_chars data/labeled_chars
 
-#### Image Processing Parameters
-- `-w 250` - White threshold (pixels above this are considered white)
-- `-b 5` - Black threshold (pixels below this are considered black)
-- `-k 3` - Kernel size for mask smoothening
-- `-s 3` - Stride for smoothening operations
-- `-m 40` - Minimum area for connected components
-- `-t 1.1` - Width threshold for detecting wide bounding boxes
-- `-p 3` - Padding around extracted character segments
-- `-c 30` - Color similarity threshold for character masking
-- `-mul 2.0` - Size multiplier for filtering large boxes
-- `--size-ratio-threshold 0.4` - Minimum box size ratio to median
-- `--large-box-ratio 2.5` - Maximum box size ratio to median
-- `--wide-box-color-threshold 30` - Color threshold for wide box processing
-
-### Output Structure
-
-The preprocessing generates:
-
-```
-output_medium/
-├── debug/                          # Combined visualization images
-│   ├── hyperparameters.json       # Processing parameters used
-│   └── [image_name]_combined.png   # Original + mask + bounding boxes
-├── [image_name]/                   # Individual character segments
-│   ├── valid_000.png              # Characters from DFS detection
-│   ├── valid_001.png
-│   ├── char_000.png               # Characters from color clustering
-│   └── char_001.png
-└── ...
+# Parallel labeling (recommended for large datasets)
+python label_data_par.py data/segmented_chars data/labeled_chars --threads 8
 ```
 
-### Key Features
+Interactive labeling tools to:
+- Process segmented character images automatically based on folder names
+- Organize characters into class-specific folders (0-9, a-z)
+- Handle parallel processing for faster labeling of large datasets
+- Generate reports on skipped folders due to segmentation issues
 
-- **Multi-Color Character Detection**: Uses DBSCAN clustering to identify characters of different colors
-- **Adaptive Bounding Box Processing**: Merges nearby components and handles nested characters
-- **Size-Based Filtering**: Removes outlier boxes based on statistical analysis
-- **Color Masking**: Applies targeted color filtering to improve character clarity
-- **Wide Box Handling**: Special processing for boxes containing multiple characters
-- **Parallel Processing**: Supports multiprocessing for efficient handling of large datasets (7000+ images)
+#### 4. **Image Resizing and Standardization**
+```bash
+python traditional_method/resize_images.py --input_folder data/labeled_chars --output_folder data/labeled_chars_28x28 --size 28
+```
 
-### Performance Optimization
+Standardizes character images:
+- Resize to 28×28 pixels for traditional methods
 
-The preprocessing pipeline supports parallel processing to handle large datasets efficiently:
+#### 5. **Data Organization**
 
-- **Automatic CPU Detection**: Uses all available CPU cores by default
-- **Configurable Workers**: Specify exact number of worker processes with `-j` or `--workers`
-- **Scalable Performance**: Achieves 3-16x speedup depending on your system's CPU cores
-- **Memory Efficient**: Uses multiprocessing Pool for optimal resource management
+The preprocessed data will be organized into the following structure:
+```
+data/
+├── labeled_train_resized_28x28/     # For traditional methods
+│   ├── 0/                           # Contains all '0' character images
+│   ├── 1/                           # Contains all '1' character images
+│   ├── a/                           # Contains all 'a' character images
+│   └── ...                          # Other characters (b-z, 2-9)
+└── labeled_test_resized_28x28/             
+```
 
-**Performance Examples:**
-- 4-core system: ~3-4x faster processing
-- 8-core system: ~6-8x faster processing
-- 16-core system: ~12-16x faster processing
+## 🧠 Baseline Models
 
-For processing 7000+ images, using multiple workers significantly reduces processing time from hours to minutes.
+The project includes two types of baseline models: **sequence-level** models (trained on complete CAPTCHA images) and **character-level** models (trained on individual character images).
 
-### Traditional Methods Components
+### Sequence-Level Models (CAPTCHA Dataset)
 
-The preprocessing system includes several specialized modules:
+These models process complete CAPTCHA images and output the entire character sequence using CTC loss for sequence-to-sequence learning.
 
-- `detect_connected_components.py` - Core DFS-based component detection
-- `color_analysis.py` - DBSCAN clustering for color extraction
-- `bounding_box.py` - Box merging and filtering algorithms
-- `segmentation.py` - Character extraction and segmentation
-- `utils.py` - Utility functions and parameter saving
+#### 1. **Baseline CNN** (`baseline-cnn.py`)
+
+A custom CNN architecture with bidirectional LSTM for sequence modeling.
+
+**Architecture:**
+
+- Input: Grayscale images (200×80)
+- 4 Convolutional layers (32, 64, 128, 256 filters)
+- Batch normalization and max pooling after each conv layer
+- Bidirectional LSTM (2 layers, 256 hidden units)
+- CTC loss for sequence alignment
+
+**Usage:**
+
+```bash
+python baselines/baseline-cnn.py
+```
+
+#### 2. **Baseline ResNet-50** (`baseline-resnet.py`)
+
+Pre-trained ResNet-50 adapted for CAPTCHA sequence recognition.
+
+**Architecture:**
+
+- Input: RGB images (200×80)
+- Pre-trained ResNet-50 backbone
+- Bidirectional LSTM (2 layers, 256 hidden units)
+- CTC loss for sequence alignment
+
+**Usage:**
+
+```bash
+python baselines/baseline-resnet.py
+```
+
+---
+
+### Character-Level Models (Character Dataset)
+
+These models classify individual characters (36 classes: 0-9, a-z) extracted from CAPTCHA images. After training, they predict each character independently and aggregate results to form complete CAPTCHA predictions.
+
+#### 3. **Character-Level CNN** (`baseline-char-cnn.py`)
+
+Lightweight CNN for individual character classification.
+
+**Architecture:**
+
+- Input: Grayscale images (32×32)
+- 4 Convolutional layers (32, 64, 128, 256 filters)
+- Batch normalization and max pooling
+- 3 Fully connected layers (512, 128, 36)
+- Dropout (0.5) for regularization
+- Cross-entropy loss
+
+**Usage:**
+
+```bash
+python baselines/baseline-char-cnn.py
+```
+
+#### 4. **Character-Level ResNet-50** (`baseline-char-resnet.py`)
+
+Transfer learning with pre-trained ResNet-50 for character classification.
+
+**Architecture:**
+
+- Input: RGB images (224×224)
+- Pre-trained ResNet-50 backbone
+- Custom classifier head (512, 36 classes)
+- Dropout (0.5, 0.3)
+- Cross-entropy loss
+
+**Usage:**
+
+```bash
+python baselines/baseline-char-resnet.py
+```
+
+#### 5. **Character-Level VGG16** (`baseline-char-vgg16.py`)
+
+Transfer learning with pre-trained VGG16 for character classification.
+
+**Architecture:**
+
+- Input: RGB images (224×224)
+- Pre-trained VGG16 backbone
+- Custom classifier head (4096, 2048, 512, 36)
+- Dropout (0.5, 0.5, 0.3)
+- Cross-entropy loss
+
+**Usage:**
+
+```bash
+python baselines/baseline-char-vgg16.py
+```
+
+#### 6. **Character-Level MLP** (`baseline-char-mlp.py`)
+
+Simple multilayer perceptron baseline for comparison.
+
+**Architecture:**
+
+- Input: Flattened grayscale images (32×32 = 1024)
+- 3 Hidden layers (512, 256, 128)
+- Dropout (0.5, 0.3, 0.3)
+- Output layer (36 classes)
+- Cross-entropy loss
+
+**Usage:**
+
+```bash
+python baselines/baseline-char-mlp.py
+```
+
+---
+
+## Handcrafted Feature Extraction Methods
+
+This project supports handcrafted feature extraction methods for character classification. These methods include:
+
+### 1. Local Spatial Features
+- Filters: Low-pass, High-pass, Gaussian, Laplacian, Sobel, Median, Butterworth
+- Statistical features: mean, std, min, max, median for each filter
+
+### 2. Frequency Domain Features
+- Transforms: Fourier, Walsh-Hadamard, KLT, Wavelet, Gabor, Power Spectrum
+- Statistical features extracted from each transform
+
+### 3. Texture Features
+- Methods: GLCM, LBP, Texton, Autocorrelation, PCA, MSMD analysis
+- Statistical features from each texture method
+
+### 4. Raw Pixel Features
+- Basic image statistics as baseline features
+
+### Training Methods
+
+#### Single-Layer Classifier
+The Single-Layer Classifier uses a simpler architecture for character classification. It is suitable for smaller datasets or when computational resources are limited.
+
+**Basic Usage:**
+```bash
+python traditional_method/train_single_layer_classifier.py data/labeled_train_resized_28x28
+```
+
+**Advanced Options:**
+```bash
+python traditional_method/train_single_layer_classifier.py data/labeled_train_resized_28x28 \
+    --batch_size 128 \
+    --epochs 200 \
+    --learning_rate 0.0005 \
+    --hidden_sizes 512 \
+    --dropout_rate 0.4 \
+    --test_size 0.15 \
+    --val_size 0.15
+```
+
+**Parameters:**
+- `input_folder`: Path to folder containing subfolders with images (required)
+- `--batch_size`: Batch size for training (default: 64)
+- `--epochs`: Number of training epochs (default: 100)
+- `--learning_rate`: Learning rate for optimizer (default: 0.001)
+- `--hidden_sizes`: Size of the single hidden layer (default: 512)
+- `--dropout_rate`: Dropout rate for regularization (default: 0.3)
+- `--test_size`: Fraction for test set (default: 0.2)
+- `--val_size`: Fraction for validation set (default: 0.1)
+- `--random_state`: Random seed for reproducibility (default: 42)
+
+#### Multi-Layer Classifier
+The Multi-Layer Classifier uses a deeper architecture with multiple hidden layers. It is designed for larger datasets and more complex feature extraction.
+
+**Basic Usage:**
+```bash
+python traditional_method/train_multilayer_classifier.py data/labeled_train_resized_28x28
+```
+
+**Advanced Options:**
+```bash
+python traditional_method/train_multilayer_classifier.py data/labeled_train_resized_28x28 \
+    --batch_size 128 \
+    --epochs 200 \
+    --learning_rate 0.0005 \
+    --hidden_sizes 1024 512 256 128 \
+    --dropout_rate 0.4 \
+    --test_size 0.15 \
+    --val_size 0.15
+```
+
+**Parameters:**
+- `input_folder`: Path to folder containing subfolders with images (required)
+- `--batch_size`: Batch size for training (default: 64)
+- `--epochs`: Number of training epochs (default: 100)
+- `--learning_rate`: Learning rate for optimizer (default: 0.001)
+- `--hidden_sizes`: List of hidden layer sizes (default: [512, 256, 128])
+- `--dropout_rate`: Dropout rate for regularization (default: 0.3)
+- `--test_size`: Fraction for test set (default: 0.2)
+- `--val_size`: Fraction for validation set (default: 0.1)
+- `--random_state`: Random seed for reproducibility (default: 42)
+
+---
+
+## 🤝 Ensemble Methods
+
+Ensemble methods combine predictions from multiple character-level models (CNN, ResNet-50, VGG16) to improve overall accuracy. All ensemble models operate on the **character dataset**.
+
+### 1. **Tree-Based Meta-Learning Ensemble** (`ensemble-tree.py`)
+
+Uses a meta-learner (decision tree or logistic regression) to combine base model predictions.
+
+**How It Works:**
+
+- Trains three base models (CNN, ResNet50, VGG16) independently on character images
+- Collects softmax probability outputs (36 classes) from each model on the validation set
+- Concatenates probability vectors (108 features: 36 × 3 models) as meta-features
+- Trains a meta-learner (logistic regression with StandardScaler) on these features
+- Meta-learner learns to weight and combine base model predictions optimally
+
+**Key Features:**
+
+- Uses full probability distributions (not just predictions) for richer information
+- Regularized logistic regression prevents overfitting
+- Can capture non-linear interactions between model predictions
+
+**Usage:**
+
+```bash
+python baselines/ensemble-tree.py
+```
+
+### 2. **Weighted Averaging Ensemble** (`ensemble-add.py`)
+
+Tests three weighted averaging strategies simultaneously in a single run.
+
+**Ensemble Methods Tested:**
+
+#### a) **Simple Average Ensemble**
+
+- Assigns equal weights (1/3, 1/3, 1/3) to all three models
+- Averages softmax probability distributions before final prediction
+- Most straightforward approach, assumes all models contribute equally
+- Robust against individual model biases
+
+#### b) **Weighted Average Ensemble**
+
+- Assigns weights based on individual validation accuracies
+- Models with higher accuracy get proportionally more influence
+- Weights are normalized to sum to 1
+- More adaptive than simple averaging while remaining interpretable
+
+#### c) **Learned Weights Ensemble**
+
+- Uses numerical optimization (scipy.minimize) to find optimal weights
+- Maximizes ensemble accuracy on the validation set
+- Constrained optimization: weights sum to 1 and are non-negative
+- Learns the best linear combination of model predictions
+- May be more sensitive to validation set characteristics
+
+**How Weighted Averaging Works:**
+
+1. Each model outputs softmax probabilities for 36 classes
+2. Ensemble combines probabilities using weighted average:
+   ```
+   P_ensemble(class_i) = w1 × P_CNN(i) + w2 × P_ResNet(i) + w3 × P_VGG(i)
+   ```
+3. Final prediction: `argmax(P_ensemble)`
+4. Resulting probabilities still sum to 1 (valid probability distribution)
+
+**Usage:**
+
+```bash
+python baselines/ensemble-add.py
+```
+
+**Output:**
+The script will test all three methods and display:
+
+- Validation accuracies for each method
+- Optimal weights learned for each approach
+- Character-level and CAPTCHA-level accuracy comparisons
+- Improvement over best individual model
+- Identifies the best performing ensemble method automatically
+
+---
+
+## 📊 Evaluation Metrics
+
+All models report the following metrics:
+
+### Character-Level Metrics:
+
+- **Accuracy**: Percentage of correctly classified characters
+- **Precision**: Weighted and macro-averaged precision
+- **Recall**: Weighted and macro-averaged recall
+- **F1-Score**: Weighted and macro-averaged F1-score
+
+### CAPTCHA-Level Metrics:
+
+- **CAPTCHA Accuracy**: Percentage of completely correct CAPTCHA predictions
+  - A CAPTCHA is considered correct only if ALL characters are predicted correctly
+  - For length-6 CAPTCHA: if per-character accuracy is 0.90, CAPTCHA accuracy ≈ 0.90^6 = 0.53
+
+---
+
+---
+
+## 📝 Notes
+
+- **GPU Recommended**: Training on GPU is highly recommended for ResNet-50 and VGG16 models
+- **Data Requirements**: Character-level models require pre-segmented character images
+
+---
+
+## 📚 References
+
+- **ResNet**: He et al., "Deep Residual Learning for Image Recognition" (2016)
+- **VGG**: Simonyan & Zisserman, "Very Deep Convolutional Networks for Large-Scale Image Recognition" (2015)
+- **Ensemble Learning**: Zhou, "Ensemble Methods: Foundations and Algorithms" (2012)
+
+---
+
+## 📧 Contact
+
+For questions or issues, please open an issue in the repository.
